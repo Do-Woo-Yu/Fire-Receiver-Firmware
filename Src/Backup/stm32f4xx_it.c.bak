@@ -1,0 +1,4186 @@
+/* USER CODE BEGIN Header */
+/**
+  ******************************************************************************
+  * @file    stm32f4xx_it.c
+  * @brief   Interrupt Service Routines.
+  ******************************************************************************
+  * @attention
+  *
+  * Copyright (c) 2024 STMicroelectronics.
+  * All rights reserved.
+  *
+  * This software is licensed under terms that can be found in the LICENSE file
+  * in the root directory of this software component.
+  * If no LICENSE file comes with this software, it is provided AS-IS.
+  *
+  ******************************************************************************
+  */
+/* USER CODE END Header */
+
+/* Includes ------------------------------------------------------------------*/
+#include "main.h"
+#include "stm32f4xx_it.h"
+/* Private includes ----------------------------------------------------------*/
+/* USER CODE BEGIN Includes */
+/* USER CODE END Includes */
+
+/* Private typedef -----------------------------------------------------------*/
+/* USER CODE BEGIN TD */
+#include "extern.h"
+#include "stdio.h"
+#include "string.h"  //C언어
+#include "SW_LED.h"
+#include "stdbool.h"
+#include <math.h>  // 반올림을 위해 필요
+/* USER CODE END TD */
+
+/* Private define ------------------------------------------------------------*/
+/* USER CODE BEGIN PD */
+/**UART TX 전송용 변수**/
+byte Tx_Data_List[50][50]; // Tx_Data_List는 전송할 데이터 리스트를 담는 이중 배열이다.
+byte List_Cnt = 0; // List_Cnt는 전송할 데이터의 갯수를 의미한다.
+unsigned char Lcd_buffer[100]; // 실제 전송할 데이터 Buffer
+unsigned int LCD_TX_TIMER = 0; // 주기적으로 (30ms) LCD_Tx()를 호출하여 전송할 데이터 리스트를 순차적으로 전송한다.
+
+byte Tx3_send_number=0, Rcv3_cnt = 0, Tx_Cnt = 0; // 데이터를 보낼때 마다 Tx_Cnt를 하나씩 증가시킴. 
+byte Tx3_index=0;
+
+/**EEPROM 저장용 변수**/
+byte EEPORM_Data_List[100]; // EEPORM_Data_List는 EEPROM의 저장할 데이터 리스트를 담는 배열이다.
+byte EE_Save_Cnt = 0,EE_Save_Num = 0; // EE_Save_Cnt는 EEPROM에 저장할 데이터의 갯수를 의미한다., EE_Save_Num 리스트에 있는 데이터를 EEPROM에 저장하는 데이터 갯수를 의미한다. 
+unsigned int EEPROM_SAVE_TIMER = 0; // 주기적으로 (30ms) LCD_Tx()를 호출하여 전송할 데이터 리스트를 순차적으로 전송한다.
+
+extern void EVENT_CREATE(word event_cnt);
+/** TIM2 변수 **/
+extern byte USB_Dis_Cnt;
+extern unsigned int Download_Timer_1, Download_Timer_2;
+extern uint8_t rwflag;
+unsigned int Restoration_LED_500ms_Timer = 0,Accumulation_LED_500ms_Timer = 0; // 복구 LED, 축적 LED 가 0.5초 동안 켜졌다가 꺼짐
+unsigned int t2_500ms_cnt = 0;
+unsigned int T10ms_cnt = 0,T1000ms_cnt = 0,T10ms_cnt_2 = 0, T1000ms_cnt_2 = 0,T500ms_cnt = 0,MODE_cnt = 0,SET_cnt = 0,DOWN_cnt = 0,UP_cnt = 0;
+byte MODE_BF_key = 0, MODE_BFBF_key = 0, MODE_Key_Value = 0;
+byte SET_BF_key = 0, SET_BFBF_key = 0, SET_Key_Value = 0;
+byte DOWN_BF_key = 0, DOWN_BFBF_key = 0, DOWN_Key_Value = 0;
+byte UP_BF_key = 0, UP_BFBF_key = 0, UP_Key_Value = 0;
+
+byte Motion_test_SW = 0, Fire_report_SW = 0, Guide_light_SW = 0, Earth_alarm_bell_SW = 0, Main_bell_SW = 0, Restoration_SW = 0, Automatic_recovery_SW = 0, Standby_power_SW = 0, Accumulation_SW = 0, Buzzer_all_the_way_SW = 0;
+byte Motion_test_BF_key = 0, Motion_test_BFBF_key = 0, Motion_test_Key_Value = 0;
+byte Fire_report_BF_key = 0, Fire_report_BFBF_key = 0, Fire_report_Key_Value = 0;
+byte Guide_light_BF_key = 0, Guide_light_BFBF_key = 0, Guide_light_Key_Value = 0;
+byte Earth_alarm_bell_BF_key = 0, Earth_alarm_bell_BFBF_key = 0, Earth_alarm_bell_Key_Value = 0;
+byte Main_bell_BF_key = 0, Main_bell_BFBF_key = 0, Main_bell_Key_Value = 0;
+byte Restoration_BF_key = 0, Restoration_BFBF_key = 0, Restoration_Key_Value = 0;
+byte Automatic_recovery_BF_key = 0, Automatic_recovery_BFBF_key = 0, Automatic_recovery_Key_Value = 0;
+byte Standby_power_BF_key = 0, Standby_power_BFBF_key = 0, Standby_power_Key_Value = 0;
+byte Accumulation_BF_key = 0, Accumulation_BFBF_key = 0, Accumulation_Key_Value = 0;
+byte Buzzer_all_the_way_BF_key = 0, Buzzer_all_the_way_BFBF_key = 0, Buzzer_all_the_way_Key_Value = 0;
+byte FIRE_CNT = 0,TB_IN_AD_FG = 1,BAT_LED = 0;
+byte circulation_cnt = 0, FIRE_NUM = 0, MAIN_RY = 0;
+byte Main_bell_TOG = 0, Earth_alarm_bell_TOG = 0, Guide_light_TOG = 0, Fire_report_TOG = 0, 
+Buzzer_all_the_way_TOG = 0, Accumulation_TOG = 0, Motion_test_TOG = 0, Automatic_recovery_TOG = 0; // 주경종, 지구경종, 유도등, 이보, 도통부저, 축적, 동작시험, 자동복구 LED Toggle 변수 1이면 토글 0이면 토글 X
+
+byte Buzzer_Fg = 0; // 회로 단선시 Buzzer음을 울림 Buzzer_Fg가 1이면 Buzzer ON, 0이면 Buzzer Off
+unsigned int Buzzer_Timer = 0; // Buzzer음을 울리기 위한 타이머
+byte Event_Buzzer_One_Time_AD1 = 0, Event_Buzzer_One_Time_AD2 = 0, Event_Buzzer_One_Time_AD3 = 0, Event_Buzzer_One_Time_AD4 = 0,
+Event_Buzzer_One_Time_AD5 = 0,Event_Buzzer_One_Time_AD6 = 0,Event_Buzzer_One_Time_AD7 = 0,Event_Buzzer_One_Time_AD8 = 0,
+Event_Buzzer_One_Time_AD9 = 0,Event_Buzzer_One_Time_AD10 = 0; // 회로 단선시 이벤트 저장과 부저음 Fg를 한번만 동작할 수 있게끔 하는 변수
+byte IN_LED1_TOG_Fg = 0, IN_LED2_TOG_Fg = 0, IN_LED3_TOG_Fg = 0, IN_LED4_TOG_Fg = 0, IN_LED5_TOG_Fg = 0, IN_LED6_TOG_Fg = 0,
+IN_LED7_TOG_Fg = 0, IN_LED8_TOG_Fg = 0, IN_LED9_TOG_Fg = 0, IN_LED10_TOG_Fg = 0; // 회로 단선시 해당 단선 회로의 LED를 Toggle하는 변수
+byte CHK_Event_Save = 0,BAT_Event_Save = 0; // 교류전원이 ON/OFF인지 예비 전원이 정상인지 이상인지를 파악하여 이벤트를 발생시키고 저장하는 변수
+byte CHG_H_L_Fg = 0; // 배터리의 연결 여부에 따라서 CHG를 High를 할것인지 Low로 할것인지 정하는 변수
+
+// 축적 변수 
+byte TB1_Accumulation = 0, Accumulation_Fg_1 = 0, TB2_Accumulation = 0, Accumulation_Fg_2 = 0, TB3_Accumulation = 0, Accumulation_Fg_3 = 0, TB4_Accumulation = 0, Accumulation_Fg_4 = 0,
+TB5_Accumulation = 0, Accumulation_Fg_5 = 0, TB6_Accumulation = 0, Accumulation_Fg_6 = 0, TB7_Accumulation = 0, Accumulation_Fg_7 = 0, TB8_Accumulation = 0, Accumulation_Fg_8 = 0,
+TB9_Accumulation = 0, Accumulation_Fg_9 = 0, TB10_Accumulation = 0, Accumulation_Fg_10 = 0; 
+byte Accumulation_Cnt = 0; // 축적 후 화재 감지 변수 다른 회로에서 화재를 감지하면 축적하지 않음
+byte Accumulation_MAIN_RY = 0; // 주경종 ON/OFF를 한번만 저장하기 위한 변수
+
+// 축적 20초 후 화재 감지시에 다른 회로에서 화재를 감지하면 이벤트 발생 및 LED 동작을 한번만 수행하도록 하는 변수
+byte TB1_One_Time = 0, TB2_One_Time = 0, TB3_One_Time = 0, TB4_One_Time = 0, TB5_One_Time = 0,
+TB6_One_Time = 0, TB7_One_Time = 0, TB8_One_Time = 0, TB9_One_Time = 0, TB10_One_Time = 0; 
+unsigned int TB1_Accumulation_Timer = 0, TB2_Accumulation_Timer = 0, TB3_Accumulation_Timer = 0, TB4_Accumulation_Timer = 0, TB5_Accumulation_Timer = 0, TB6_Accumulation_Timer = 0,
+TB7_Accumulation_Timer = 0, TB8_Accumulation_Timer = 0, TB9_Accumulation_Timer = 0, TB10_Accumulation_Timer = 0;
+
+// 동작시험 관련 변수
+byte Motion_test_Mode = 0; // 1이면 위 아래 버튼으로 화재 발생, 2이면 전체 회로 화재 발생
+byte Test_Mode_1_Cnt = 0; // 동작시험 모드가 1이라면 위 아래 버튼으로 각각의 회로에 화재를 발생시킨다. ex) Test_Mode_1_Cnt가 1이면 1회로 화재 발생
+byte Test_Mode_1_Cnt_BF = 0; // 동작시험 모드가 1이라면 회로 화재 발생을 한번만 동작시킴
+byte Motion_test_Mode_BF = 0; // 동작시험 모드가 2라면 전체 회로 화재 발생을 한번만 동작시킴
+unsigned int Motion_test_Timer = 0; // 동작시험 버튼을 2초 동안 누르지 않으면 1모드, 2초 동안 누르면 2모드
+byte Motion_test_Mode_Define = 0; // 동작시험 모드가 결정되면 다시는 조건문에 들어가지 못하게 함
+
+// 자동복구 관련 변수
+byte TB_Fire_Cnt = 0; // 화재가 발생한 회로가 1개 이상이라면 자동복구와 동시에 1을 만들어줌. 화재가 발생하지 않으면 항상 0 
+
+extern unsigned char Down_Success_Text_Appear[30]; // 다운로드 화면에서 다운로드 완료 텍스트 출력
+extern unsigned char Down_Success_Text_Green[13]; // 다운로드 화면에서 다운로드 완료 텍스트 초록색으로 변경
+extern unsigned char Korean_Data[28];
+extern word Event_Page;
+extern word P_Type_Cnt;
+extern uint8_t P_Type_Data[64]; /* File write buffer */ // UTF-8 P형 수신기 이벤트 텍스트 + 날짜 + 시간 텍스트 
+extern byte P_Type_Receiver_Event[1001][64];
+
+extern byte EEPROM_WriteByte(uint32_t address, byte wr_buffer[], byte wr_length);
+extern uint8_t EEPROM_ReadByte(uint32_t address, byte rd_buffer[], byte rd_length);
+extern byte save_event;
+
+/** TIM3 변수 **/
+unsigned int TIM3_T1000ms_Timer = 0,EN_H_L_24V_CNT = 0;
+float CAL_BAT_AD, CAL_TB_IN_AD1, CAL_TB_IN_AD2, CAL_TB_IN_AD3, CAL_TB_IN_AD4, CAL_TB_IN_AD5, CAL_TB_IN_AD6,
+CAL_TB_IN_AD7, CAL_TB_IN_AD8, CAL_TB_IN_AD9, CAL_TB_IN_AD10, CAL_CHK_26V, CAL_TB_SEND_AD, CAL_COIN_AD;
+
+float AVR_BAT_AD, AVR_TB_IN_AD1, AVR_TB_IN_AD2, AVR_TB_IN_AD3, AVR_TB_IN_AD4, AVR_TB_IN_AD5, AVR_TB_IN_AD6,
+AVR_TB_IN_AD7, AVR_TB_IN_AD8, AVR_TB_IN_AD9, AVR_TB_IN_AD10, AVR_CHK_26V, AVR_TB_SEND_AD, AVR_COIN_AD;
+
+unsigned int TB1_Fire_Cnt = 0, TB2_Fire_Cnt = 0, TB3_Fire_Cnt = 0, TB4_Fire_Cnt = 0, TB5_Fire_Cnt = 0, TB6_Fire_Cnt = 0, TB7_Fire_Cnt = 0, TB8_Fire_Cnt = 0, TB9_Fire_Cnt = 0, TB10_Fire_Cnt = 0, TB_SEND_Fire_Cnt;
+byte TB1_Fire_Fg = 0, TB2_Fire_Fg = 0, TB3_Fire_Fg = 0, TB4_Fire_Fg = 0, TB5_Fire_Fg = 0, TB6_Fire_Fg = 0, TB7_Fire_Fg = 0, TB8_Fire_Fg = 0, TB9_Fire_Fg = 0, TB10_Fire_Fg = 0, TB_SEND_Fire_Fg = 0, EN_H_L_24V_FG = 0;
+byte GENERATOR = 0;// 1이면 발생기 출력 0 이면 발생기 출력 x
+
+/** 화재시 홈화면에서 화재 텍스트 출력 **/
+extern unsigned char P_TYPE_RECIEVER_TEXT_Reset[11]; // 화재시 홈화면 P형 수신기 텍스트 초기화
+extern unsigned char TEVA_TECH_TEXT_Reset[11]; // 화재시 홈화면 테바테크 텍스트 초기화
+extern unsigned char FIRE_TEXT_Send[17]; // 화재시 홈화면 화재 텍스트 출력
+
+/** 복구시 홈화면에서 화재 텍스트 초기화 및 P형 수신기 텍스트 출력 및 테바테크 텍스트 출력 **/
+extern unsigned char P_TYPE_RECIEVER_TEXT_Send[25]; // 복구시 홈화면 P형 수신기 텍스트 출력
+extern unsigned char TEVA_TECH_TEXT_Send[23]; // 복구시 홈화면 테바테크 텍스트 출력
+extern unsigned char FIRE_TEXT_Reset[11]; // 복구시 홈화면 화재 텍스트 초기화
+
+/** 홈화면이나 MODE 화면에서 시스템 전압, 예비전원 전압, 시계전원 전압을 1초마다 전송한다. **/
+extern unsigned char SYSTEM_Vol_0[16]; // 홈 화면에서 시스템 전압
+extern unsigned char STANDBY_POWER_Vol_0[16]; // 홈 화면에서 예비전원 전압
+extern unsigned char CLOCK_POWER_Vol_0[15]; // 홈 화면에서 시계전원 전압
+
+extern unsigned char SYSTEM_Vol_1[16]; // MODE 화면에서 시스템 전압
+extern unsigned char STANDBY_POWER_Vol_1[16]; // MODE 화면에서 예비전원 전압
+extern unsigned char CLOCK_POWER_Vol_1[15]; // MODE 화면에서 시계전원 전압
+
+/* USER CODE END PD */
+
+/* Private macro -------------------------------------------------------------*/
+/* USER CODE BEGIN PM */
+void LCD_Tx(byte lcd_tx_num);
+/* USER CODE END PM */
+
+/* Private variables ---------------------------------------------------------*/
+/* USER CODE BEGIN PV */
+void LCD_Tx(byte lcd_tx_num)	//UART3
+{
+	/*Send the character*/
+  	memcpy(Lcd_buffer, Tx_Data_List[Tx_Cnt], 30); // Tx_Cnt를 List_Cnt 즉, 데이터 전송 리스트 갯수만큼 차례대로 복사하여 데이터를 전송한다.
+	USART3->DR = Lcd_buffer[0];
+	Tx3_index = 1;
+	Tx3_send_number = lcd_tx_num-1;
+	USART3->CR1 &= ~USART_CR1_RXNEIE; 	//USART3's RXE Interrupt Disable	
+	USART3->CR1 |= USART_CR1_TCIE; 		//USART3's TXE Interrupt Enable	
+}
+/* USER CODE END PV */
+
+/* Private function prototypes -----------------------------------------------*/
+/* USER CODE BEGIN PFP */
+
+/* USER CODE END PFP */
+
+/* Private user code ---------------------------------------------------------*/
+/* USER CODE BEGIN 0 */
+
+/* USER CODE END 0 */
+
+/* External variables --------------------------------------------------------*/
+extern HCD_HandleTypeDef hhcd_USB_OTG_FS;
+extern DMA_HandleTypeDef hdma_adc2;
+extern ADC_HandleTypeDef hadc2;
+extern RTC_HandleTypeDef hrtc;
+extern SPI_HandleTypeDef hspi1;
+extern TIM_HandleTypeDef htim1;
+extern TIM_HandleTypeDef htim2;
+extern TIM_HandleTypeDef htim3;
+extern UART_HandleTypeDef huart3;
+/* USER CODE BEGIN EV */
+
+/* USER CODE END EV */
+
+/******************************************************************************/
+/*           Cortex-M4 Processor Interruption and Exception Handlers          */
+/******************************************************************************/
+/**
+  * @brief This function handles Non maskable interrupt.
+  */
+void NMI_Handler(void)
+{
+  /* USER CODE BEGIN NonMaskableInt_IRQn 0 */
+
+  /* USER CODE END NonMaskableInt_IRQn 0 */
+  /* USER CODE BEGIN NonMaskableInt_IRQn 1 */
+  while (1)
+  {
+  }
+  /* USER CODE END NonMaskableInt_IRQn 1 */
+}
+
+/**
+  * @brief This function handles Hard fault interrupt.
+  */
+void HardFault_Handler(void)
+{
+  /* USER CODE BEGIN HardFault_IRQn 0 */
+
+  /* USER CODE END HardFault_IRQn 0 */
+  while (1)
+  {
+    /* USER CODE BEGIN W1_HardFault_IRQn 0 */
+    /* USER CODE END W1_HardFault_IRQn 0 */
+  }
+}
+
+/**
+  * @brief This function handles Memory management fault.
+  */
+void MemManage_Handler(void)
+{
+  /* USER CODE BEGIN MemoryManagement_IRQn 0 */
+
+  /* USER CODE END MemoryManagement_IRQn 0 */
+  while (1)
+  {
+    /* USER CODE BEGIN W1_MemoryManagement_IRQn 0 */
+    /* USER CODE END W1_MemoryManagement_IRQn 0 */
+  }
+}
+
+/**
+  * @brief This function handles Pre-fetch fault, memory access fault.
+  */
+void BusFault_Handler(void)
+{
+  /* USER CODE BEGIN BusFault_IRQn 0 */
+
+  /* USER CODE END BusFault_IRQn 0 */
+  while (1)
+  {
+    /* USER CODE BEGIN W1_BusFault_IRQn 0 */
+    /* USER CODE END W1_BusFault_IRQn 0 */
+  }
+}
+
+/**
+  * @brief This function handles Undefined instruction or illegal state.
+  */
+void UsageFault_Handler(void)
+{
+  /* USER CODE BEGIN UsageFault_IRQn 0 */
+  static word hardfaul_cnt = 0;
+  hardfaul_cnt++;
+  /* USER CODE END UsageFault_IRQn 0 */
+  while (1)
+  {
+    /* USER CODE BEGIN W1_UsageFault_IRQn 0 */
+    /* USER CODE END W1_UsageFault_IRQn 0 */
+  }
+}
+
+/**
+  * @brief This function handles System service call via SWI instruction.
+  */
+void SVC_Handler(void)
+{
+  /* USER CODE BEGIN SVCall_IRQn 0 */
+
+  /* USER CODE END SVCall_IRQn 0 */
+  /* USER CODE BEGIN SVCall_IRQn 1 */
+
+  /* USER CODE END SVCall_IRQn 1 */
+}
+
+/**
+  * @brief This function handles Debug monitor.
+  */
+void DebugMon_Handler(void)
+{
+  /* USER CODE BEGIN DebugMonitor_IRQn 0 */
+
+  /* USER CODE END DebugMonitor_IRQn 0 */
+  /* USER CODE BEGIN DebugMonitor_IRQn 1 */
+
+  /* USER CODE END DebugMonitor_IRQn 1 */
+}
+
+/**
+  * @brief This function handles Pendable request for system service.
+  */
+void PendSV_Handler(void)
+{
+  /* USER CODE BEGIN PendSV_IRQn 0 */
+
+  /* USER CODE END PendSV_IRQn 0 */
+  /* USER CODE BEGIN PendSV_IRQn 1 */
+
+  /* USER CODE END PendSV_IRQn 1 */
+}
+
+/**
+  * @brief This function handles System tick timer.
+  */
+void SysTick_Handler(void)
+{
+  /* USER CODE BEGIN SysTick_IRQn 0 */
+
+  /* USER CODE END SysTick_IRQn 0 */
+  HAL_IncTick();
+  /* USER CODE BEGIN SysTick_IRQn 1 */
+
+  /* USER CODE END SysTick_IRQn 1 */
+}
+
+/******************************************************************************/
+/* STM32F4xx Peripheral Interrupt Handlers                                    */
+/* Add here the Interrupt Handlers for the used peripherals.                  */
+/* For the available peripheral interrupt handler names,                      */
+/* please refer to the startup file (startup_stm32f4xx.s).                    */
+/******************************************************************************/
+
+/**
+  * @brief This function handles RTC wake-up interrupt through EXTI line 22.
+  */
+void RTC_WKUP_IRQHandler(void)
+{
+  /* USER CODE BEGIN RTC_WKUP_IRQn 0 */
+
+  /* USER CODE END RTC_WKUP_IRQn 0 */
+  HAL_RTCEx_WakeUpTimerIRQHandler(&hrtc);
+  /* USER CODE BEGIN RTC_WKUP_IRQn 1 */
+
+  /* USER CODE END RTC_WKUP_IRQn 1 */
+}
+
+/**
+  * @brief This function handles RCC global interrupt.
+  */
+void RCC_IRQHandler(void)
+{
+  /* USER CODE BEGIN RCC_IRQn 0 */
+
+  /* USER CODE END RCC_IRQn 0 */
+  /* USER CODE BEGIN RCC_IRQn 1 */
+
+  /* USER CODE END RCC_IRQn 1 */
+}
+
+/**
+  * @brief This function handles ADC1, ADC2 and ADC3 global interrupts.
+  */
+void ADC_IRQHandler(void)
+{
+  /* USER CODE BEGIN ADC_IRQn 0 */
+
+  /* USER CODE END ADC_IRQn 0 */
+  HAL_ADC_IRQHandler(&hadc2);
+  /* USER CODE BEGIN ADC_IRQn 1 */
+
+  /* USER CODE END ADC_IRQn 1 */
+}
+
+/**
+  * @brief This function handles TIM1 capture compare interrupt.
+  */
+byte capture_fg = 0;
+
+uint32_t IC_Val1 = 0;
+uint32_t IC_Val2 = 0;
+
+float frequency = 0;
+float dutyCycle = 0;
+
+uint32_t Real_Frequency = 0;   // 반올림된 주파수 값
+uint32_t Real_DutyCycle = 0;   // 반올림된 듀티사이클 값
+
+uint32_t over_frequency = 0;
+uint32_t over_dutyCycle = 0;
+
+void TIM1_CC_IRQHandler(void)
+{
+  /* USER CODE BEGIN TIM1_CC_IRQn 0 */
+
+  /* USER CODE END TIM1_CC_IRQn 0 */
+	__HAL_TIM_CLEAR_IT(&htim1, TIM_IT_CC2);
+	//__HAL_TIM_CLEAR_IT(&htim1, TIM_IT_CC3);
+	
+	if (!capture_fg)  // if the interrupt source is channel1
+	{
+		IC_Val1 = HAL_TIM_ReadCapturedValue(&htim1, TIM_CHANNEL_2);
+		TIM1->CNT = 0;
+		capture_fg = 1;
+	}
+	else  // if the interrupt source is channel1
+	{
+		IC_Val2 = HAL_TIM_ReadCapturedValue(&htim1, TIM_CHANNEL_3);
+		dutyCycle = (float)IC_Val2/(float)IC_Val1 * 100;
+		frequency = 1000000 / (float)IC_Val1;
+		
+		capture_fg = 0;
+	}
+	
+  //HAL_TIM_IRQHandler(&htim1);
+  /* USER CODE BEGIN TIM1_CC_IRQn 1 */
+
+  /* USER CODE END TIM1_CC_IRQn 1 */
+}
+
+/**
+  * @brief This function handles TIM2 global interrupt.
+  */
+void TIM2_IRQHandler(void)
+{
+  /* USER CODE BEGIN TIM2_IRQn 0 */
+  __HAL_TIM_CLEAR_FLAG(&htim2,TIM_FLAG_UPDATE);
+  
+  if(++T10ms_cnt >= 100)
+  {
+	T10ms_cnt = 0;
+	static unsigned int timer_cnt_test = 0;
+	timer_cnt_test++;
+	
+	/** MODE 스위치 **/
+	MODE_SW = !((GPIOB -> IDR & GPIO_PIN_12) >> 12);
+	
+	if(MODE_SW == MODE_BF_key)
+	{
+	  if(MODE_SW)
+	  {
+		if(MODE_BF_key != MODE_BFBF_key)
+		{
+		  MODE_Key_Value++; // MODE로 가기 명령
+		  DOWN_Key_Value = 0;
+		  UP_Key_Value = 0;
+		}
+	  }
+	  MODE_BFBF_key = MODE_BF_key;
+	}
+	MODE_BF_key = MODE_SW;
+	
+	/** SET 스위치 **/
+	SET_SW = !((GPIOB -> IDR & GPIO_PIN_13) >> 13);
+	
+	if(SET_SW == SET_BF_key && WHAT_MODE != 0)
+	{
+	  if(SET_SW)
+	  {
+		if(SET_BF_key != SET_BFBF_key)
+		{
+		  SET_Key_Value++; // 확인 명령
+		}
+	  }
+	  SET_BFBF_key = SET_BF_key;
+	}
+	SET_BF_key = SET_SW;
+	
+	/** ▼ 스위치 **/
+	DOWN_SW = !((GPIOB -> IDR & GPIO_PIN_14) >> 14);
+	
+	if(DOWN_SW == DOWN_BF_key)
+	{
+	  if(DOWN_SW)
+	  {
+		if(DOWN_BF_key != DOWN_BFBF_key)
+		{
+		  DOWN_Key_Value++; // Down 버튼
+		  if(Motion_test_Mode == 1 && Test_Mode_1_Cnt == 0 && WHAT_MODE == 0) // 동작모드 1이고 Test_Mode_1_Cnt가 0이며 홈 화면일 때만 최초 화재 발생 가능 그 이후 부터는 ▲ 스위치로만 가능
+		  {
+			  Test_Mode_1_Cnt++;
+		  }
+		}
+	  }
+	  DOWN_BFBF_key = DOWN_BF_key;
+	}
+	DOWN_BF_key = DOWN_SW;
+	
+	/** ▲ 스위치 **/
+	UP_SW = !((GPIOB -> IDR & GPIO_PIN_15) >> 15);
+	
+	if(UP_SW == UP_BF_key)
+	{
+	  if(UP_SW)
+	  {
+		if(UP_BF_key != UP_BFBF_key)
+		{
+		  UP_Key_Value++; // Up 버튼
+		  if(Motion_test_Mode == 1 && WHAT_MODE == 0) // 동작모드가 1이고 홈 화면일 때만 회로 화재 발생 가능
+		  {
+			  Test_Mode_1_Cnt++;
+		  }
+		}
+	  }
+	  UP_BFBF_key = UP_BF_key;
+	}
+	UP_BF_key = UP_SW;
+	
+	/** 동작 시험 스위치 **/
+	Motion_test_SW = !((GPIOB -> IDR & GPIO_PIN_11) >> 11);
+	
+	if(Motion_test_SW != Motion_test_BF_key && WHAT_MODE == 0) // 동작 시험 스위치는 홈 화면에서만 동작한다.
+	{
+	  if(!Motion_test_SW)
+	  {
+		if(Motion_test_BF_key != Motion_test_BFBF_key)
+		{
+		  Motion_test_Key_Value++; // Up 버튼	
+		  if(Motion_test_Key_Value == 1 && Motion_test_Mode != 2) // 동작시험 모드 2번째( 전체 회로 화재 )이 아닐때
+		  {
+			Motion_test_TOG = 1; // 동작시험 LED 토글
+			EEPORM_Data_List[EE_Save_Cnt] = 43; // P형 수신기 이벤트에 동작시험 수동 SW ON 이벤트 추가 및 EEPROM에 저장
+			EE_Save_Cnt++;
+			Motion_test_Mode = 1; // 동작시험 스위치를 짧게 누르면 동작시험 모드 1번째( 위 아래 버튼으로 각각의 회로 화재 발생 )
+			Motion_test_Mode_Define = 1; // 동작 시험 모드가 결정되면 다시 조건문에 들어오지 못항
+		  }
+		  if(Motion_test_Key_Value == 2)
+		  {
+			  Motion_test_Key_Value = 0;
+			  Motion_test_Timer = 0;
+			  Motion_test_Mode_Define = 0;
+			  Motion_test_Mode = 0;
+			  Test_Mode_1_Cnt_BF = 0;
+		  	  Motion_test_Mode_BF = 0;
+		  	  Test_Mode_1_Cnt = 0;
+		  }
+		}
+	  }
+	  if(Motion_test_SW && Motion_test_Mode_Define && Motion_test_Key_Value == 1)
+	  {
+		if(Motion_test_BF_key != Motion_test_BFBF_key)
+		{
+			if(Motion_test_Key_Value == 1)
+		    {
+			  Motion_test_TOG = 0;
+			  SW_LED10_OFF;
+			  if(Motion_test_Mode == 1)
+			  {
+			    EEPORM_Data_List[EE_Save_Cnt] = 44; // P형 수신기 이벤트에 동작시험 수동 SW OFF 이벤트 추가 및 EEPROM에 저장
+			    EE_Save_Cnt++;
+			  }
+		    }
+		}
+	  }
+	  Motion_test_BFBF_key = Motion_test_BF_key;
+	}
+	Motion_test_BF_key = Motion_test_SW;
+	
+	if(Motion_test_SW && !Motion_test_Mode_Define)
+	{
+	  if(++Motion_test_Timer >= 200) 
+	  {
+		  Motion_test_Timer = 0;
+		  Motion_test_TOG = 1; // 동작시험 LED 토글
+		  EEPORM_Data_List[EE_Save_Cnt] = 41; // P형 수신기 이벤트에 동작시험 자동 SW ON 이벤트 추가 및 EEPROM에 저장
+		  EE_Save_Cnt++;
+		  Motion_test_Mode = 2; // 2초 동안 스위치를 누르면 동작시험 모드 2번째( 전체 회로 화재 )
+		  Motion_test_Mode_Define = 1; // 동작 시험 모드가 결정되면 다시 조건문에 들어오지 못항
+	  }
+	}
+	
+	if(Motion_test_Mode != Motion_test_Mode_BF) // 현재 동작시험 모드와 전의 동작시험 모드와 다르다면( 동작 시험 모드 2를 한번만 실행이 되게끔 만들기 위함 )
+	{
+	  if(Motion_test_Mode == 2) // 2초 동안 스위치를 누르면 동작시험 모드 2번째( 전체 회로 화재 )
+	  {
+		FIRE_CNT = 1;
+		if(circulation_cnt == 0)
+		{
+			circulation_cnt++;
+			FIRE_NUM++;
+		}
+		  
+		// 홈화면에서 P형 수신기, 테바테크 글자 지우고 중간에 화재 빨간색 글씨로 출력
+	    memcpy(Tx_Data_List[List_Cnt], P_TYPE_RECIEVER_TEXT_Reset, 11); // P형 수신기 텍스트 초기화
+	    List_Cnt++;
+	  
+	    memcpy(Tx_Data_List[List_Cnt], TEVA_TECH_TEXT_Reset, 11); // 테바테크 텍스트 초기화
+	    List_Cnt++;
+	  
+	    memcpy(Tx_Data_List[List_Cnt], FIRE_TEXT_Send, 17); // 화재 텍스트 출력
+	    List_Cnt++;
+	  
+	    MOD_LED8_ON; // 화재 경보등1 LED 출력
+	    MOD_LED9_ON; // 화재 경보등2 LED 출력
+		if(!TB1_Fire_Fg) // 회로 1이 화재가 아니라면
+		{
+			EEPORM_Data_List[EE_Save_Cnt] = 13; // P형 수신기 이벤트에 회로 1 화재 이벤트 추가 및 EEPROM에 저장
+			EE_Save_Cnt++;
+			IN_LED1_ON; // 회로 1 LED 출력
+		}
+		if(!TB2_Fire_Fg) // 회로 2이 화재가 아니라면
+		{
+			EEPORM_Data_List[EE_Save_Cnt] = 15; // P형 수신기 이벤트에 회로 2 화재 이벤트 추가 및 EEPROM에 저장
+			EE_Save_Cnt++;
+			IN_LED2_ON; // 회로 2 LED 출력
+		}
+		if(!TB3_Fire_Fg) // 회로 3이 화재가 아니라면
+		{
+			EEPORM_Data_List[EE_Save_Cnt] = 17; // P형 수신기 이벤트에 회로 3 화재 이벤트 추가 및 EEPROM에 저장
+			EE_Save_Cnt++;
+			IN_LED3_ON; // 회로 3 LED 출력
+		}
+		if(!TB4_Fire_Fg) // 회로 4이 화재가 아니라면
+		{
+			EEPORM_Data_List[EE_Save_Cnt] = 19; // P형 수신기 이벤트에 회로 4 화재 이벤트 추가 및 EEPROM에 저장
+			EE_Save_Cnt++;
+			IN_LED4_ON; // 회로 4 LED 출력
+		}
+		if(!TB5_Fire_Fg) // 회로 5이 화재가 아니라면
+		{
+			EEPORM_Data_List[EE_Save_Cnt] = 21; // P형 수신기 이벤트에 회로 5 화재 이벤트 추가 및 EEPROM에 저장
+			EE_Save_Cnt++;
+			IN_LED5_ON; // 회로 5 LED 출력
+		}
+	    /*if(!TB6_Fire_Fg) // 회로 6이 화재가 아니라면
+		{
+			EEPORM_Data_List[EE_Save_Cnt] = 23; // P형 수신기 이벤트에 회로 6 화재 이벤트 추가 및 EEPROM에 저장
+			EE_Save_Cnt++;
+			IN_LED6_ON; // 회로 6 LED 출력
+		}
+		if(!TB7_Fire_Fg) // 회로 7이 화재가 아니라면
+		{
+			EEPORM_Data_List[EE_Save_Cnt] = 25; // P형 수신기 이벤트에 회로 7 화재 이벤트 추가 및 EEPROM에 저장
+			EE_Save_Cnt++;
+			IN_LED7_ON; // 회로 7 LED 출력
+		}
+		if(!TB8_Fire_Fg) // 회로 8이 화재가 아니라면
+		{
+			EEPORM_Data_List[EE_Save_Cnt] = 27; // P형 수신기 이벤트에 회로 8 화재 이벤트 추가 및 EEPROM에 저장
+			EE_Save_Cnt++;
+			IN_LED8_ON; // 회로 8 LED 출력
+		}
+		if(!TB9_Fire_Fg) // 회로 9이 화재가 아니라면
+		{
+			EEPORM_Data_List[EE_Save_Cnt] = 29; // P형 수신기 이벤트에 회로 9 화재 이벤트 추가 및 EEPROM에 저장
+			EE_Save_Cnt++;
+			IN_LED9_ON; // 회로 9 LED 출력
+		}
+		if(!TB10_Fire_Fg) // 회로 10이 화재가 아니라면
+		{
+	    EEPORM_Data_List[EE_Save_Cnt] = 31; // P형 수신기 이벤트에 회로 10 화재 이벤트 추가 및 EEPROM에 저장
+	    EE_Save_Cnt++;
+	    IN_LED10_ON; // 회로 10 LED 출력
+		}*/
+		if(MAIN_RY == 0) // 주경종 OFF 즉 화재 중이 아닐때 동작시험 모드 2라면
+		{
+			if(Main_bell_Key_Value == 1) // 주경종 SW ON상태일때인데 회로 화재라면
+			{
+			  Main_bell_Key_Value = 0;
+			  Main_bell_TOG = 0;
+			  SW_LED4_OFF;
+			}
+			// 화재시 유도등 LED OFF후 유도등 출력
+			SW_LED2_OFF;
+			Guide_light_Key_Value = 0;
+			Guide_light_TOG = 0;
+			
+			// 화재시 이보 LED OFF후 이보 출력
+			SW_LED1_OFF;
+			Fire_report_Key_Value = 0;
+			Fire_report_TOG = 0;
+			
+			MAIN_RY = 1; // MAIN_RY가 1이면 주경종 출력 중				
+			EEPORM_Data_List[EE_Save_Cnt] = 37; // P형 수신기 이벤트에 주경종 출력 ON 이벤트 추가 및 EEPROM에 저장
+			EE_Save_Cnt++;
+			MAIN_RY_H; // 주경종 출력
+			if(Earth_alarm_bell_Key_Value != 1) // 지구경종 SW OFF 일때만 지구경종 출력 및 이벤트 추가
+			{
+				EEPORM_Data_List[EE_Save_Cnt] = 35; // P형 수신기 이벤트에 지구경종 출력 ON 이벤트 추가 및 EEPROM에 저장
+				EE_Save_Cnt++;
+				LOCAL_RY_H; // 지구경종 출력
+			}
+			EEPORM_Data_List[EE_Save_Cnt] = 9; // P형 수신기 이벤트에 유도등 출력 ON 이벤트 추가 및 EEPROM에 저장
+			EE_Save_Cnt++;
+			GUID_RY_H; // 유도등 출력
+			EEPORM_Data_List[EE_Save_Cnt] = 33; // P형 수신기 이벤트에 이보 출력 ON 이벤트 추가 및 EEPROM에 저장
+			EE_Save_Cnt++;
+			FIRE_RY_H; // 이보 출력
+		  }
+		  EEPORM_Data_List[EE_Save_Cnt] = 42; // P형 수신기 이벤트에 동작시험 자동 SW OFF 이벤트 추가 및 EEPROM에 저장
+		  EE_Save_Cnt++;	
+	  }
+	}
+	
+	Motion_test_Mode_BF = Motion_test_Mode;
+	
+	/** 화재 이보 스위치 **/
+	Fire_report_SW = !((GPIOB -> IDR & GPIO_PIN_10) >> 10);
+	
+	if(Fire_report_SW == Fire_report_BF_key)
+	{
+	  if(Fire_report_SW)
+	  {
+		if(Fire_report_BF_key != Fire_report_BFBF_key)
+		{
+		  Fire_report_Key_Value++; 
+		  if(Fire_report_Key_Value == 1 && !FIRE_CNT)
+		  {
+			Fire_report_TOG = 1; // 유도등 LED 토글
+			EEPORM_Data_List[EE_Save_Cnt] = 78; // P형 수신기 이벤트에 이보 SW ON 이벤트 추가 및 EEPROM에 저장
+			EE_Save_Cnt++;
+		    FIRE_RY_H;
+		    EEPORM_Data_List[EE_Save_Cnt] = 33; // P형 수신기 이벤트에 이보 출력 ON 이벤트 추가 및 EEPROM에 저장
+		    EE_Save_Cnt++;
+		  }
+		  else if(Fire_report_Key_Value == 2 && !FIRE_CNT)
+		  {
+			Fire_report_Key_Value = 0;
+			Fire_report_TOG = 0;
+			SW_LED1_OFF;
+			EEPORM_Data_List[EE_Save_Cnt] = 79; // P형 수신기 이벤트에 이보 SW OFF 이벤트 추가 및 EEPROM에 저장
+			EE_Save_Cnt++;
+			FIRE_RY_L;
+			EEPORM_Data_List[EE_Save_Cnt] = 32; // P형 수신기 이벤트에 이보 출력 OFF 이벤트 추가 및 EEPROM에 저장
+			EE_Save_Cnt++;
+		  }
+		}
+	  }
+	  Fire_report_BFBF_key = Fire_report_BF_key;
+	}
+	Fire_report_BF_key = Fire_report_SW;
+	
+	/** 유도등 스위치 **/
+	Guide_light_SW = !((GPIOE -> IDR & GPIO_PIN_15) >> 15);
+	
+	if(Guide_light_SW == Guide_light_BF_key)
+	{
+	  if(Guide_light_SW)
+	  {
+		if(Guide_light_BF_key != Guide_light_BFBF_key)
+		{
+		  Guide_light_Key_Value++; 
+		  if(Guide_light_Key_Value == 1 && !FIRE_CNT)
+		  {
+			Guide_light_TOG = 1; // 유도등 LED 토글
+			EEPORM_Data_List[EE_Save_Cnt] = 11; // P형 수신기 이벤트에 유도등 SW ON 이벤트 추가 및 EEPROM에 저장
+			EE_Save_Cnt++;
+		    GUID_RY_H;
+		    EEPORM_Data_List[EE_Save_Cnt] = 9; // P형 수신기 이벤트에 유도등 출력 ON 이벤트 추가 및 EEPROM에 저장
+		    EE_Save_Cnt++;
+		  }
+		  else if(Guide_light_Key_Value == 2 && !FIRE_CNT)
+		  {
+			Guide_light_Key_Value = 0;
+			Guide_light_TOG = 0;
+			SW_LED2_OFF;
+			EEPORM_Data_List[EE_Save_Cnt] = 10; // P형 수신기 이벤트에 유도등 SW OFF 이벤트 추가 및 EEPROM에 저장
+			EE_Save_Cnt++;
+			GUID_RY_L;
+			EEPORM_Data_List[EE_Save_Cnt] = 8; // P형 수신기 이벤트에 유도등 출력 OFF 이벤트 추가 및 EEPROM에 저장
+			EE_Save_Cnt++;
+		  }
+		}
+	  }
+	  Guide_light_BFBF_key = Guide_light_BF_key;
+	}
+	Guide_light_BF_key = Guide_light_SW;
+	
+	/** 지구경종 스위치 **/
+	Earth_alarm_bell_SW = !((GPIOE -> IDR & GPIO_PIN_14) >> 14);
+	
+	if(Earth_alarm_bell_SW == Earth_alarm_bell_BF_key)
+	{
+	  if(Earth_alarm_bell_SW)
+	  {
+		if(Earth_alarm_bell_BF_key != Earth_alarm_bell_BFBF_key)
+		{
+		  Earth_alarm_bell_Key_Value++; // Up 버튼
+		  if(Earth_alarm_bell_Key_Value == 1)
+		  {
+			Earth_alarm_bell_TOG = 1; // 지구경종 LED 토글	
+			EEPORM_Data_List[EE_Save_Cnt] = 76; // P형 수신기 이벤트에 지구경종 SW ON 이벤트 추가 및 EEPROM에 저장
+			EE_Save_Cnt++;
+			if(FIRE_CNT) // 화재가 났을경우 누르면 지구경종 OFF
+			{
+			  LOCAL_RY_L;
+			  EEPORM_Data_List[EE_Save_Cnt] = 34; // P형 수신기 이벤트에 지구경종 출력 OFF 이벤트 추가 및 EEPROM에 저장
+			  EE_Save_Cnt++;
+			}
+		  }
+		  else if(Earth_alarm_bell_Key_Value == 2)
+		  {
+			Earth_alarm_bell_Key_Value = 0;
+			Earth_alarm_bell_TOG = 0;
+			SW_LED3_OFF;
+			EEPORM_Data_List[EE_Save_Cnt] = 77; // P형 수신기 이벤트에 지구경종 SW OFF 이벤트 추가 및 EEPROM에 저장
+			EE_Save_Cnt++;
+			if(FIRE_CNT) // 화재가 났을경우 다시 누르면 지구경종 ON
+			{
+			  LOCAL_RY_H;
+			  EEPORM_Data_List[EE_Save_Cnt] = 35; // P형 수신기 이벤트에 지구경종 출력 ON 이벤트 추가 및 EEPROM에 저장
+			  EE_Save_Cnt++;
+			}
+		  }
+		}
+	  }
+	  Earth_alarm_bell_BFBF_key = Earth_alarm_bell_BF_key;
+	}
+	Earth_alarm_bell_BF_key = Earth_alarm_bell_SW;
+	
+	/** 주경종 스위치 **/
+	Main_bell_SW = !((GPIOE -> IDR & GPIO_PIN_13) >> 13);
+	
+	if(Main_bell_SW == Main_bell_BF_key)
+	{
+	  if(Main_bell_SW)
+	  {
+		if(Main_bell_BF_key != Main_bell_BFBF_key)
+		{
+		  Main_bell_Key_Value++; // Up 버튼
+		  if(Main_bell_Key_Value == 1)
+		  {
+			Main_bell_TOG = 1;
+			EEPORM_Data_List[EE_Save_Cnt] = 74; // P형 수신기 이벤트에 주경종 SW ON 이벤트 추가 및 EEPROM에 저장
+			EE_Save_Cnt++;
+			if(FIRE_CNT) // 화재가 났을경우 누르면 주경종 OFF
+			{
+			  MAIN_RY_L;
+			  EEPORM_Data_List[EE_Save_Cnt] = 36; // P형 수신기 이벤트에 주경종 출력 OFF 이벤트 추가 및 EEPROM에 저장
+			  EE_Save_Cnt++;
+			}
+		  }
+		  else if(Main_bell_Key_Value == 2)
+		  {
+			Main_bell_Key_Value = 0;
+			Main_bell_TOG = 0;
+			SW_LED4_OFF;
+			EEPORM_Data_List[EE_Save_Cnt] = 75; // P형 수신기 이벤트에 주경종 SW OFF 이벤트 추가 및 EEPROM에 저장
+			EE_Save_Cnt++;
+			if(FIRE_CNT) // 화재가 났을경우 누르면 주경종 ON
+			{
+			  MAIN_RY_H;
+			  EEPORM_Data_List[EE_Save_Cnt] = 37; // P형 수신기 이벤트에 주경종 출력 ON 이벤트 추가 및 EEPROM에 저장
+			  EE_Save_Cnt++;
+			}
+		  }
+		}
+	  }
+	  Main_bell_BFBF_key = Main_bell_BF_key;
+	}
+	Main_bell_BF_key = Main_bell_SW;
+	
+	/** 자동 복구 스위치 **/
+	Automatic_recovery_SW = !((GPIOC -> IDR & GPIO_PIN_13) >> 13);
+	
+	if(Automatic_recovery_SW == Automatic_recovery_BF_key)
+	{
+	  if(Automatic_recovery_SW)
+	  {
+		if(Automatic_recovery_BF_key != Automatic_recovery_BFBF_key)
+		{
+		  Automatic_recovery_Key_Value++; // 자동복구 버튼
+		  if(Automatic_recovery_Key_Value == 1)
+		  {
+			Automatic_recovery_TOG = 1; // 지구경종 LED 토글	
+			EEPORM_Data_List[EE_Save_Cnt] = 72; // P형 수신기 이벤트에 자동복구 SW ON 이벤트 추가 및 EEPROM에 저장
+			EE_Save_Cnt++;
+		  }
+		  else if(Automatic_recovery_Key_Value == 2)
+		  {
+			Automatic_recovery_Key_Value = 0;
+			Automatic_recovery_TOG = 0;
+			SW_LED9_OFF;
+			EEPORM_Data_List[EE_Save_Cnt] = 71; // P형 수신기 이벤트에 자동복구 SW OFF 이벤트 추가 및 EEPROM에 저장
+			EE_Save_Cnt++;
+		  }
+		}
+	  }
+	  Automatic_recovery_BFBF_key = Automatic_recovery_BF_key;
+	}
+	Automatic_recovery_BF_key = Automatic_recovery_SW;
+	
+	if(Automatic_recovery_Key_Value == 1) // 자동복구 SW가 눌려있다면
+	{
+		// 회로중 화재 감지 회로가 있다면 자동으로 복구 스위치가 눌림
+		if((TB1_Fire_Fg || TB2_Fire_Fg || TB3_Fire_Fg || TB4_Fire_Fg || TB5_Fire_Fg || TB6_Fire_Fg || TB7_Fire_Fg || TB8_Fire_Fg || TB9_Fire_Fg || TB10_Fire_Fg) && TB_Fire_Cnt == 0)
+		{
+		  if(TB_IN_AD1 >= 2.0 && TB_IN_AD2 >= 2.0 && TB_IN_AD3 >= 2.0 && TB_IN_AD4 >= 2.0 && TB_IN_AD5 >= 2.0 && TB_IN_AD6 >= 2.0 && TB_IN_AD7 >= 2.0 && TB_IN_AD8 >= 2.0 && TB_IN_AD9 >= 2.0 && TB_IN_AD10 >= 2.0 && TB_Fire_Cnt == 0)
+		  {
+			  //TB_Fire_Cnt를 1로 만들어 주면서 복구기능을 한번만 수행하도록 함. TB_Fire_Cnt는 화재 감지 회로가 없다면 자동으로 0으로 바뀐다.
+			  TB_Fire_Cnt = 1;
+			  
+			  // 홈화면에서 P형 수신기, 테바테크 글자 출력하고 중간에 화재 빨간색 글씨 초기화
+			  memcpy(Tx_Data_List[List_Cnt], P_TYPE_RECIEVER_TEXT_Send, 25); // P형 수신기 텍스트 출력
+			  List_Cnt++;
+
+			  memcpy(Tx_Data_List[List_Cnt], TEVA_TECH_TEXT_Send, 23); // 테바테크 텍스트 출력
+			  List_Cnt++;
+
+			  memcpy(Tx_Data_List[List_Cnt], FIRE_TEXT_Reset, 11); // 화재 텍스트 초기화
+			  List_Cnt++;			  
+			  
+			  if(FIRE_CNT) // 화재가 났을경우에만 복구 SW 누르면 주경종,지구경종,유도등,이보 출력 OFF 신호를 보내고 저장함.
+			  {
+				FIRE_CNT = 0;
+				EEPORM_Data_List[EE_Save_Cnt] = 36; // P형 수신기 이벤트에 주경종 출력 OFF 이벤트 추가 및 EEPROM에 저장
+				EE_Save_Cnt++;
+				if(Earth_alarm_bell_Key_Value != 1) // 지구경종 SW OFF 일때만 P형 수신기 이벤트에 지구경종 출력 OFF 이벤트 추가 및 EEPROM에 저장
+				{
+					EEPORM_Data_List[EE_Save_Cnt] = 34; // P형 수신기 이벤트에 지구경종 출력 OFF 이벤트 추가 및 EEPROM에 저장
+					EE_Save_Cnt++;
+					LOCAL_RY_H; // 지구경종 출력
+				}
+				EEPORM_Data_List[EE_Save_Cnt] = 8; // P형 수신기 이벤트에 유도등 출력 OFF 이벤트 추가 및 EEPROM에 저장
+				EE_Save_Cnt++;
+				EEPORM_Data_List[EE_Save_Cnt] = 32; // P형 수신기 이벤트에 이보 출력 OFF 이벤트 추가 및 EEPROM에 저장
+				EE_Save_Cnt++;
+				MAIN_RY_L; // 주경종 OFF
+				LOCAL_RY_L; // 지구경종 OFF
+				GUID_RY_L; // 유도등 OFF
+				FIRE_RY_L; // 이보 OFF
+				MOD_LED8_OFF; // 화재 경보등1 LED OFF
+				MOD_LED9_OFF; // 화재 경보등2 LED OFF
+				IN_LED1_OFF; // 회로 1 LED OFF
+				IN_LED2_OFF; // 회로 2 LED OFF
+				IN_LED3_OFF; // 회로 3 LED OFF
+				IN_LED4_OFF; // 회로 4 LED OFF
+				IN_LED5_OFF; // 회로 5 LED OFF
+				IN_LED6_OFF; // 회로 6 LED OFF
+				IN_LED7_OFF; // 회로 7 LED OFF
+				IN_LED8_OFF; // 회로 8 LED OFF
+				IN_LED9_OFF; // 회로 9 LED OFF
+				IN_LED10_OFF; // 회로 10 LED OFF
+			  }
+			  
+			  MAIN_RY = 0;
+			  SW_LED4_OFF;
+			  Main_bell_Key_Value = 0;
+			  Main_bell_TOG = 0;
+			  
+			  SW_LED3_OFF;
+			  Earth_alarm_bell_Key_Value = 0;
+			  Earth_alarm_bell_TOG = 0;
+			  
+			  if(Motion_test_Key_Value) // 동작시험 스위치가 눌려있다면
+			  {
+				SW_LED10_OFF;
+				Motion_test_Key_Value = 0;
+				Motion_test_TOG = 0;
+				EEPORM_Data_List[EE_Save_Cnt] = 80; // P형 수신기 이벤트에 동작시험 OFF 이벤트 추가 및 EEPROM에 저장
+				EE_Save_Cnt++;
+				Motion_test_Timer = 0;
+				Motion_test_Mode_Define = 0;
+				Motion_test_Mode = 0;
+				Test_Mode_1_Cnt_BF = 0;
+				Motion_test_Mode_BF = 0;
+				Test_Mode_1_Cnt = 0;
+			  }
+				
+			  
+			  if(Guide_light_Key_Value) // 유도등 SW가 눌려있을때 복구 버튼을 누르면 유도등 출력 OFF 이벤트를 추가한다.
+			  {
+				EEPORM_Data_List[EE_Save_Cnt] = 8; // P형 수신기 이벤트에 유도등 출력 OFF 이벤트 추가 및 EEPROM에 저장
+				EE_Save_Cnt++;
+				GUID_RY_L; // 유도등 출력 OFF
+			  }
+			  
+			  SW_LED2_OFF;
+			  Guide_light_Key_Value = 0;
+			  Guide_light_TOG = 0;
+			  
+			  if(Fire_report_Key_Value) // 화재이보 SW가 눌려있을때 복구 버튼을 누르면 이보 출력 OFF 이벤트를 추가한다.
+			  {
+				EEPORM_Data_List[EE_Save_Cnt] = 32; // P형 수신기 이벤트에 이보 출력 OFF 이벤트 추가 및 EEPROM에 저장
+				EE_Save_Cnt++;
+				FIRE_RY_L; // 이보 출력 OFF
+			  }
+			  
+			  SW_LED1_OFF;
+			  Fire_report_Key_Value = 0;
+			  Fire_report_TOG = 0;
+			  
+			  EN_H_L_24V_FG = 1;
+			  if(EN_H_L_24V_FG == 1)
+			  {
+				EN_H_L_24V_FG = 0;
+				TB_IN_AD_FG = 0;
+				EN_L_24V;
+				EN_H_L_24V_CNT = 10000; // 1초 뒤에 다시 EN_H_24V
+			  }
+			  
+			  // 축적 변수 초기화
+			  TB1_Accumulation = 0;
+			  TB1_Accumulation_Timer = 0;
+			  TB2_Accumulation = 0;
+			  TB2_Accumulation_Timer = 0;
+			  TB3_Accumulation = 0;
+			  TB3_Accumulation_Timer = 0;
+			  TB4_Accumulation = 0;
+			  TB4_Accumulation_Timer = 0;
+			  TB5_Accumulation = 0;
+			  TB5_Accumulation_Timer = 0;
+			  TB6_Accumulation = 0;
+			  TB6_Accumulation_Timer = 0;
+			  TB7_Accumulation = 0;
+			  TB7_Accumulation_Timer = 0;
+			  TB8_Accumulation = 0;
+			  TB8_Accumulation_Timer = 0;
+			  TB9_Accumulation = 0;
+			  TB9_Accumulation_Timer = 0;
+			  TB10_Accumulation = 0;
+			  TB10_Accumulation_Timer = 0;
+			  TB1_One_Time = 0;
+			  TB2_One_Time = 0;
+			  TB3_One_Time = 0;
+			  TB4_One_Time = 0;
+			  TB5_One_Time = 0;
+			  TB6_One_Time = 0;
+			  TB7_One_Time = 0;
+			  TB8_One_Time = 0;
+			  TB9_One_Time = 0;
+			  TB10_One_Time = 0;
+			  Accumulation_Cnt = 0;
+			  
+			  /**복구 시 회로 단선이면 다시 한번 단선 회로 이벤트 발생 **/
+			  if(TB_IN_AD1 >= 2.9) // 1회로 단선
+			  {
+				EEPORM_Data_List[EE_Save_Cnt] = 61; // P형 수신기 이벤트에 회로1 단선 이벤트 추가 및 EEPROM에 저장
+				EE_Save_Cnt++;
+			  }
+				
+			  if(TB_IN_AD2 >= 2.9) // 2회로 단선
+			  {
+				EEPORM_Data_List[EE_Save_Cnt] = 62; // P형 수신기 이벤트에 회로2 단선 이벤트 추가 및 EEPROM에 저장
+				EE_Save_Cnt++;
+			  }
+				
+			  if(TB_IN_AD3 >= 2.9) // 3회로 단선
+			  {
+				EEPORM_Data_List[EE_Save_Cnt] = 63; // P형 수신기 이벤트에 회로3 단선 이벤트 추가 및 EEPROM에 저장
+				EE_Save_Cnt++;
+			  }
+				
+			  if(TB_IN_AD4 >= 2.9) // 4회로 단선
+			  {
+				EEPORM_Data_List[EE_Save_Cnt] = 64; // P형 수신기 이벤트에 회로4 단선 이벤트 추가 및 EEPROM에 저장
+				EE_Save_Cnt++;
+			  }
+				
+			  if(TB_IN_AD5 >= 2.9) // 5회로 단선
+			  {
+				EEPORM_Data_List[EE_Save_Cnt] = 65; // P형 수신기 이벤트에 회로5 단선 이벤트 추가 및 EEPROM에 저장
+				EE_Save_Cnt++;
+			  }
+				
+			  /*if(TB_IN_AD6 >= 2.9) // 6회로 단선
+			  {
+				EEPORM_Data_List[EE_Save_Cnt] = 66; // P형 수신기 이벤트에 회로6 단선 이벤트 추가 및 EEPROM에 저장
+				EE_Save_Cnt++;
+			  }
+				
+			  if(TB_IN_AD7 >= 2.9) // 7회로 단선
+			  {
+				EEPORM_Data_List[EE_Save_Cnt] = 67; // P형 수신기 이벤트에 회로7 단선 이벤트 추가 및 EEPROM에 저장
+				EE_Save_Cnt++;
+			  }
+				
+			  if(TB_IN_AD8 >= 2.9) // 8회로 단선
+			  {
+				EEPORM_Data_List[EE_Save_Cnt] = 68; // P형 수신기 이벤트에 회로8 단선 이벤트 추가 및 EEPROM에 저장
+				EE_Save_Cnt++;
+			  }
+				
+			  if(TB_IN_AD9 >= 2.9) // 9회로 단선
+			  {
+				EEPORM_Data_List[EE_Save_Cnt] = 69; // P형 수신기 이벤트에 회로9 단선 이벤트 추가 및 EEPROM에 저장
+				EE_Save_Cnt++;
+			  }
+				
+			  if(TB_IN_AD10 >= 2.9) // 10회로 단선
+			  {
+				EEPORM_Data_List[EE_Save_Cnt] = 70; // P형 수신기 이벤트에 회로10 단선 이벤트 추가 및 EEPROM에 저장
+				EE_Save_Cnt++;
+			  }*/
+		  }
+		}
+	}
+	
+	/** 복구 스위치 **/
+	Restoration_SW = !((GPIOE -> IDR & GPIO_PIN_12) >> 12);
+	
+	if(Restoration_SW == Restoration_BF_key)
+	{
+	  if(Restoration_SW)
+	  {
+		if(Restoration_BF_key != Restoration_BFBF_key)
+		{
+		  SW_LED5_ON;
+		  Restoration_LED_500ms_Timer = 5000;
+		  // 홈화면에서 P형 수신기, 테바테크 글자 출력하고 중간에 화재 빨간색 글씨 초기화
+		  memcpy(Tx_Data_List[List_Cnt], P_TYPE_RECIEVER_TEXT_Send, 25); // P형 수신기 텍스트 출력
+		  List_Cnt++;
+
+		  memcpy(Tx_Data_List[List_Cnt], TEVA_TECH_TEXT_Send, 23); // 테바테크 텍스트 출력
+		  List_Cnt++;
+
+		  memcpy(Tx_Data_List[List_Cnt], FIRE_TEXT_Reset, 11); // 화재 텍스트 초기화
+		  List_Cnt++;
+		  EEPORM_Data_List[EE_Save_Cnt] = 38; // P형 수신기 이벤트에 복구 SW ON 이벤트 저장 및 EEPROM에 저장
+		  EE_Save_Cnt++;
+		  FIRE_NUM = 0;
+		  
+		  
+		  if(FIRE_CNT) // 화재가 났을경우에만 복구 SW 누르면 주경종,지구경종,유도등,이보 출력 OFF 신호를 보내고 저장함.
+		  {
+			FIRE_CNT = 0;
+			EEPORM_Data_List[EE_Save_Cnt] = 36; // P형 수신기 이벤트에 주경종 출력 OFF 이벤트 추가 및 EEPROM에 저장
+			EE_Save_Cnt++;
+			if(Earth_alarm_bell_Key_Value != 1) // 지구경종 SW OFF 일때만 P형 수신기 이벤트에 지구경종 출력 OFF 이벤트 추가 및 EEPROM에 저장
+			{
+				EEPORM_Data_List[EE_Save_Cnt] = 34; // P형 수신기 이벤트에 지구경종 출력 OFF 이벤트 추가 및 EEPROM에 저장
+				EE_Save_Cnt++;
+				LOCAL_RY_H; // 지구경종 출력
+			}
+			EEPORM_Data_List[EE_Save_Cnt] = 8; // P형 수신기 이벤트에 유도등 출력 OFF 이벤트 추가 및 EEPROM에 저장
+			EE_Save_Cnt++;
+			EEPORM_Data_List[EE_Save_Cnt] = 32; // P형 수신기 이벤트에 이보 출력 OFF 이벤트 추가 및 EEPROM에 저장
+			EE_Save_Cnt++;
+			MAIN_RY_L; // 주경종 OFF
+			LOCAL_RY_L; // 지구경종 OFF
+			GUID_RY_L; // 유도등 OFF
+			FIRE_RY_L; // 이보 OFF
+			MOD_LED8_OFF; // 화재 경보등1 LED OFF
+			MOD_LED9_OFF; // 화재 경보등2 LED OFF
+			IN_LED1_OFF; // 회로 1 LED OFF
+			IN_LED2_OFF; // 회로 2 LED OFF
+			IN_LED3_OFF; // 회로 3 LED OFF
+			IN_LED4_OFF; // 회로 4 LED OFF
+			IN_LED5_OFF; // 회로 5 LED OFF
+			IN_LED6_OFF; // 회로 6 LED OFF
+			IN_LED7_OFF; // 회로 7 LED OFF
+			IN_LED8_OFF; // 회로 8 LED OFF
+			IN_LED9_OFF; // 회로 9 LED OFF
+			IN_LED10_OFF; // 회로 10 LED OFF
+		  }
+		  
+		  MAIN_RY = 0;
+		  SW_LED4_OFF;
+		  Main_bell_Key_Value = 0;
+		  Main_bell_TOG = 0;
+		  
+		  SW_LED3_OFF;
+		  Earth_alarm_bell_Key_Value = 0;
+		  Earth_alarm_bell_TOG = 0;
+		  
+		  if(Motion_test_Key_Value) // 동작시험 스위치가 눌려있다면
+		  {
+		    SW_LED10_OFF;
+		    Motion_test_Key_Value = 0;
+		    Motion_test_TOG = 0;
+			EEPORM_Data_List[EE_Save_Cnt] = 80; // P형 수신기 이벤트에 동작시험 OFF 이벤트 추가 및 EEPROM에 저장
+			EE_Save_Cnt++;
+			Motion_test_Timer = 0;
+			Motion_test_Mode_Define = 0;
+			Motion_test_Mode = 0;
+			Test_Mode_1_Cnt_BF = 0;
+		    Motion_test_Mode_BF = 0;
+		    Test_Mode_1_Cnt = 0;
+		  }
+			
+		  
+		  if(Guide_light_Key_Value) // 유도등 SW가 눌려있을때 복구 버튼을 누르면 유도등 출력 OFF 이벤트를 추가한다.
+		  {
+			EEPORM_Data_List[EE_Save_Cnt] = 8; // P형 수신기 이벤트에 유도등 출력 OFF 이벤트 추가 및 EEPROM에 저장
+			EE_Save_Cnt++;
+			GUID_RY_L; // 유도등 출력 OFF
+		  }
+		  
+		  SW_LED2_OFF;
+		  Guide_light_Key_Value = 0;
+		  Guide_light_TOG = 0;
+		  
+		  if(Fire_report_Key_Value) // 화재이보 SW가 눌려있을때 복구 버튼을 누르면 이보 출력 OFF 이벤트를 추가한다.
+		  {
+			EEPORM_Data_List[EE_Save_Cnt] = 32; // P형 수신기 이벤트에 이보 출력 OFF 이벤트 추가 및 EEPROM에 저장
+			EE_Save_Cnt++;
+			FIRE_RY_L; // 이보 출력 OFF
+		  }
+		  
+		  SW_LED1_OFF;
+		  Fire_report_Key_Value = 0;
+		  Fire_report_TOG = 0;
+		  
+		  EN_H_L_24V_FG = 1;
+		  if(EN_H_L_24V_FG == 1)
+		  {
+			EN_H_L_24V_FG = 0;
+			TB_IN_AD_FG = 0;
+		  	EN_L_24V;
+			EN_H_L_24V_CNT = 10000; // 1초 뒤에 다시 EN_H_24V
+		  }
+		  
+		  // 축적 변수 초기화
+		  TB1_Accumulation = 0;
+		  TB1_Accumulation_Timer = 0;
+		  TB2_Accumulation = 0;
+		  TB2_Accumulation_Timer = 0;
+		  TB3_Accumulation = 0;
+		  TB3_Accumulation_Timer = 0;
+		  TB4_Accumulation = 0;
+		  TB4_Accumulation_Timer = 0;
+		  TB5_Accumulation = 0;
+		  TB5_Accumulation_Timer = 0;
+		  TB6_Accumulation = 0;
+		  TB6_Accumulation_Timer = 0;
+		  TB7_Accumulation = 0;
+		  TB7_Accumulation_Timer = 0;
+		  TB8_Accumulation = 0;
+		  TB8_Accumulation_Timer = 0;
+		  TB9_Accumulation = 0;
+		  TB9_Accumulation_Timer = 0;
+		  TB10_Accumulation = 0;
+		  TB10_Accumulation_Timer = 0;
+		  TB1_One_Time = 0;
+		  TB2_One_Time = 0;
+		  TB3_One_Time = 0;
+		  TB4_One_Time = 0;
+		  TB5_One_Time = 0;
+		  TB6_One_Time = 0;
+		  TB7_One_Time = 0;
+		  TB8_One_Time = 0;
+		  TB9_One_Time = 0;
+		  TB10_One_Time = 0;
+		  Accumulation_Cnt = 0;
+		  
+		  /**복구 시 회로 단선이면 다시 한번 단선 회로 이벤트 발생 **/
+		  if(TB_IN_AD1 >= 2.9) // 1회로 단선
+		  {
+		    EEPORM_Data_List[EE_Save_Cnt] = 61; // P형 수신기 이벤트에 회로1 단선 이벤트 추가 및 EEPROM에 저장
+		    EE_Save_Cnt++;
+		  }
+			
+		  if(TB_IN_AD2 >= 2.9) // 2회로 단선
+		  {
+		    EEPORM_Data_List[EE_Save_Cnt] = 62; // P형 수신기 이벤트에 회로2 단선 이벤트 추가 및 EEPROM에 저장
+		    EE_Save_Cnt++;
+		  }
+			
+		  if(TB_IN_AD3 >= 2.9) // 3회로 단선
+		  {
+		    EEPORM_Data_List[EE_Save_Cnt] = 63; // P형 수신기 이벤트에 회로3 단선 이벤트 추가 및 EEPROM에 저장
+		    EE_Save_Cnt++;
+		  }
+			
+		  if(TB_IN_AD4 >= 2.9) // 4회로 단선
+		  {
+		    EEPORM_Data_List[EE_Save_Cnt] = 64; // P형 수신기 이벤트에 회로4 단선 이벤트 추가 및 EEPROM에 저장
+		    EE_Save_Cnt++;
+		  }
+			
+		  if(TB_IN_AD5 >= 2.9) // 5회로 단선
+		  {
+		    EEPORM_Data_List[EE_Save_Cnt] = 65; // P형 수신기 이벤트에 회로5 단선 이벤트 추가 및 EEPROM에 저장
+		    EE_Save_Cnt++;
+		  }
+			
+		  /*if(TB_IN_AD6 >= 2.9) // 6회로 단선
+		  {
+		    EEPORM_Data_List[EE_Save_Cnt] = 66; // P형 수신기 이벤트에 회로6 단선 이벤트 추가 및 EEPROM에 저장
+		    EE_Save_Cnt++;
+		  }
+			
+		  if(TB_IN_AD7 >= 2.9) // 7회로 단선
+		  {
+		    EEPORM_Data_List[EE_Save_Cnt] = 67; // P형 수신기 이벤트에 회로7 단선 이벤트 추가 및 EEPROM에 저장
+		    EE_Save_Cnt++;
+		  }
+			
+		  if(TB_IN_AD8 >= 2.9) // 8회로 단선
+		  {
+		    EEPORM_Data_List[EE_Save_Cnt] = 68; // P형 수신기 이벤트에 회로8 단선 이벤트 추가 및 EEPROM에 저장
+		    EE_Save_Cnt++;
+		  }
+			
+		  if(TB_IN_AD9 >= 2.9) // 9회로 단선
+		  {
+		    EEPORM_Data_List[EE_Save_Cnt] = 69; // P형 수신기 이벤트에 회로9 단선 이벤트 추가 및 EEPROM에 저장
+		    EE_Save_Cnt++;
+		  }
+			
+		  if(TB_IN_AD10 >= 2.9) // 10회로 단선
+		  {
+		    EEPORM_Data_List[EE_Save_Cnt] = 70; // P형 수신기 이벤트에 회로10 단선 이벤트 추가 및 EEPROM에 저장
+		    EE_Save_Cnt++;
+		  }*/
+		}
+	  }
+	  Restoration_BFBF_key = Restoration_BF_key;
+	}
+	Restoration_BF_key = Restoration_SW;
+	
+	
+	/** 예비전원 스위치 **/ // 누르고 있으면 BAT_V_EN -> High 실제 배터리의 전압이 나옴, 떼면 BAT_V_EN -> Low 충전되는 배터리의 전압이 나옴
+	Standby_power_SW = !((GPIOE -> IDR & GPIO_PIN_10) >> 10);
+	
+	if(Standby_power_SW == Standby_power_BF_key)
+	{
+	  if(Standby_power_SW)
+	  {
+		if(Standby_power_BF_key != Standby_power_BFBF_key)
+		{
+		  BATV_H;
+		  //SW_LED7_ON;
+		}
+	  }
+	  else
+	  {
+	     BATV_L;
+		 //SW_LED7_OFF;
+	  }
+	  Standby_power_BFBF_key = Standby_power_BF_key;
+	}
+	Standby_power_BF_key = Standby_power_SW;
+	
+	/** 축적 스위치 **/
+	Accumulation_SW = !((GPIOE -> IDR & GPIO_PIN_9) >> 9);
+	
+	if(Accumulation_SW == Accumulation_BF_key)
+	{
+	  if(Accumulation_SW)
+	  {
+		if(Accumulation_BF_key != Accumulation_BFBF_key)
+		{
+		  Accumulation_Key_Value++;
+		  SW_LED8_ON;
+		  Accumulation_LED_500ms_Timer = 5000;
+		  if(Accumulation_Key_Value == 1)
+		  {
+			Accumulation_TOG = 1; // 축적 LED 토글
+			EEPORM_Data_List[EE_Save_Cnt] = 46; // P형 수신기 이벤트에 축적중 SW ON 이벤트 추가 및 EEPROM에 저장
+			EE_Save_Cnt++;
+		  }
+		  else if(Accumulation_Key_Value == 2)
+		  {
+			Accumulation_Key_Value = 0;
+			Accumulation_TOG = 0;
+			MOD_LED4_OFF;
+			EEPORM_Data_List[EE_Save_Cnt] = 45; // P형 수신기 이벤트에 축적중 SW OFF 이벤트 추가 및 EEPROM에 저장
+			EE_Save_Cnt++;
+			// 축적 변수 초기화
+			TB1_Accumulation = 0;
+			TB1_Accumulation_Timer = 0;
+			TB2_Accumulation = 0;
+			TB2_Accumulation_Timer = 0;
+			TB3_Accumulation = 0;
+			TB3_Accumulation_Timer = 0;
+			TB4_Accumulation = 0;
+			TB4_Accumulation_Timer = 0;
+			TB5_Accumulation = 0;
+			TB5_Accumulation_Timer = 0;
+			TB6_Accumulation = 0;
+			TB6_Accumulation_Timer = 0;
+			TB7_Accumulation = 0;
+			TB7_Accumulation_Timer = 0;
+			TB8_Accumulation = 0;
+			TB8_Accumulation_Timer = 0;
+			TB9_Accumulation = 0;
+			TB9_Accumulation_Timer = 0;
+			TB10_Accumulation = 0;
+			TB10_Accumulation_Timer = 0;
+			TB1_One_Time = 0;
+		    TB2_One_Time = 0;
+		    TB3_One_Time = 0;
+		    TB4_One_Time = 0;
+		    TB5_One_Time = 0;
+		    TB6_One_Time = 0;
+		    TB7_One_Time = 0;
+		    TB8_One_Time = 0;
+		    TB9_One_Time = 0;
+		    TB10_One_Time = 0;
+			Accumulation_Cnt = 0;
+		  }
+		}
+	  }
+	  Accumulation_BFBF_key = Accumulation_BF_key;
+	}
+	Accumulation_BF_key = Accumulation_SW;
+	
+	/** 도통부저 스위치 **/
+	/*Buzzer_all_the_way_SW = !((GPIOC -> IDR & GPIO_PIN_13) >> 13);
+	
+	if(Buzzer_all_the_way_SW == Buzzer_all_the_way_BF_key)
+	{
+	  if(Buzzer_all_the_way_SW)
+	  {
+		if(Buzzer_all_the_way_BF_key != Buzzer_all_the_way_BFBF_key)
+		{
+		  Buzzer_all_the_way_Key_Value++;
+		  if(Buzzer_all_the_way_Key_Value == 1)
+		  {
+			Buzzer_all_the_way_TOG = 1; // 도통부저 LED 토글
+			BUZZER_OFF; 
+			EEPORM_Data_List[EE_Save_Cnt] = 59; // P형 수신기 이벤트에 도통부저 SW ON 이벤트 추가 및 EEPROM에 저장
+			EE_Save_Cnt++;
+		  }
+		  else if(Buzzer_all_the_way_Key_Value == 2)
+		  {
+			Buzzer_all_the_way_Key_Value = 0;
+			Buzzer_all_the_way_TOG = 0;
+			SW_LED9_OFF;
+			EEPORM_Data_List[EE_Save_Cnt] = 60; // P형 수신기 이벤트에 도통부저 SW OFF 이벤트 추가 및 EEPROM에 저장
+			EE_Save_Cnt++;
+		  }
+		}
+	  }
+	  Buzzer_all_the_way_BFBF_key = Buzzer_all_the_way_BF_key;
+	}
+	Buzzer_all_the_way_BF_key = Buzzer_all_the_way_SW;*/
+  }
+  
+  if(Restoration_LED_500ms_Timer) // 복구 SW LED용 0.5초간 점멸하고 복구 LED OFF
+  {
+	  if(--Restoration_LED_500ms_Timer <= 0)
+	  {
+		  Restoration_LED_500ms_Timer = 0;
+		  SW_LED5_OFF;
+	  }
+  }
+  
+  if(Accumulation_LED_500ms_Timer) // 축적 SW LED용 0.5초간 점멸하고 축적 LED OFF
+  {
+	  if(--Accumulation_LED_500ms_Timer <= 0)
+	  {
+		  Accumulation_LED_500ms_Timer = 0;
+		  SW_LED8_OFF;
+	  }
+  }
+  
+  if(++T1000ms_cnt >= 10000)
+  {
+	T1000ms_cnt = 0;
+	
+	static byte tim_cnt = 0;
+	tim_cnt++;
+	
+	if(WHAT_MODE == 0) // 홈 화면일때 1초 마다 날짜, 시간, 시스템 전압, 예비전원 전압, 시계전원 전압 전송
+	{
+	    Date_Data[4] = 0x00;
+		Date_Data[6] = 0x01;
+	  	Time_Data[4] = 0x00;
+		Time_Data[6] = 0x02;
+	  
+		/**데이터 송신 시간 비교(HAL, 최적화 함수)**/
+		
+		/*CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk; // Enable DWT
+		DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;           // Enable Cycle Counter
+		DWT->CYCCNT = 0;                               // Reset Counter
+		
+		uint32_t start = DWT->CYCCNT;*/
+
+		//HAL_UART_Transmit(&huart3, Date_Data, 21, 10);
+
+		//uint32_t end = DWT->CYCCNT;
+		
+		/**데이터 송신 시간 비교(HAL, 최적화 함수)**/
+		
+		memcpy(Tx_Data_List[List_Cnt], Date_Data, 21); // 1초마다 홈화면의 날짜 데이터 전송
+		List_Cnt++;
+		
+		memcpy(Tx_Data_List[List_Cnt], Time_Data, 19); // 1초마다 홈화면의 시간 데이터 전송
+		List_Cnt++;
+		
+		
+		if(TB_IN_AD_FG == 1)
+		{
+		  memcpy(Tx_Data_List[List_Cnt], SYSTEM_Vol_0, 16); // 1초마다 홈화면의 시스템 전압 데이터 전송
+		  List_Cnt++;
+
+		  memcpy(Tx_Data_List[List_Cnt], STANDBY_POWER_Vol_0, 16); // 1초마다 홈화면의 예비전원 전압 데이터 전송
+		  List_Cnt++;
+
+		  memcpy(Tx_Data_List[List_Cnt], CLOCK_POWER_Vol_0, 15); // 1초마다 홈화면의 시계전원 전압 데이터 전송
+		  List_Cnt++;
+		}
+	}
+	else if(WHAT_MODE == 1) // 메뉴 화면일때 1초 마다 날짜, 시간, 시스템 전압, 예비전원 전압, 시계전원 전압 전송
+	{
+	  	Date_Data[4] = 0x01;
+		Date_Data[6] = 0x08;
+	  	Time_Data[4] = 0x01;
+		Time_Data[6] = 0x09;
+
+		memcpy(Tx_Data_List[List_Cnt], Date_Data, 21); // 1초마다 메뉴 화면의 날짜 데이터 전송
+		List_Cnt++;
+		
+		memcpy(Tx_Data_List[List_Cnt], Time_Data, 19); // 1초마다 메뉴 화면의 시간 데이터 전송
+		List_Cnt++;
+		
+		if(TB_IN_AD_FG == 1)
+		{
+		  memcpy(Tx_Data_List[List_Cnt], SYSTEM_Vol_1, 16); // 1초마다 메뉴 화면의 시스템 전압 데이터 전송
+		  List_Cnt++;
+
+		  memcpy(Tx_Data_List[List_Cnt], STANDBY_POWER_Vol_1, 16); // 1초마다 메뉴 화면의 예비전원 전압 데이터 전송
+		  List_Cnt++;
+
+		  memcpy(Tx_Data_List[List_Cnt], CLOCK_POWER_Vol_1, 15); // 1초마다 메뉴 화면의 시계전원 전압 데이터 전송
+		  List_Cnt++;
+		}
+	}
+	
+	if(Buzzer_Fg && !Buzzer_all_the_way_Key_Value) // 회로 단선시 부저음을 1초마다 토글함, 도통부저 SW ON이 아닐때 동작
+	{
+		Buzzer_Timer = !Buzzer_Timer;
+		if(Buzzer_Timer)
+		{
+			BUZZER_ON;
+		}
+		else
+		{
+			BUZZER_OFF;
+		}
+	}
+  }
+  
+  if(List_Cnt) // 데이터 전송 리스트에 하나라도 있다면 데이터를 보낼 준비를 한다.
+  {
+	byte i = 0, Tx_Data_Cnt = 0;
+	if(++LCD_TX_TIMER >= 300) // 30ms 마다 전송 데이터 리스트에 있는 데이터를 보낸다.
+	{
+	  LCD_TX_TIMER = 0;
+	  for(i = 0; i <= 30; i++) // LCD에 보내는 명령어의 끝부분에는 0xFF, 0xFC, 0xFF, 0xFF가 default로 들어가있으므로 이를 활용하여 데이터를 몇 바이트 보낼지를 계산하여 전송 데이터 갯수만큼만 보낸다.
+	  {
+		  if(Tx_Data_Cnt == 0 && Tx_Data_List[Tx_Cnt][i] == 0xFF)
+		  {
+			  Tx_Data_Cnt++;
+		  }
+		  if(Tx_Data_Cnt == 1 && Tx_Data_List[Tx_Cnt][i] == 0xFC)
+		  {
+			  Tx_Data_Cnt++;
+		  }
+		  if(Tx_Data_Cnt == 2 && Tx_Data_List[Tx_Cnt][i] == 0xFF)
+		  {
+			  Tx_Data_Cnt++;
+		  }
+		  if(Tx_Data_Cnt == 3 && Tx_Data_List[Tx_Cnt][i] == 0xFF)
+		  {
+			  Tx_Data_Cnt = i+2;
+			  break;
+		  }
+	  }
+	  LCD_Tx(Tx_Data_Cnt);
+	}
+  }
+  
+  if(EE_Save_Cnt) // EEPROM 데이터 저장 리스트에 하나 이상의 데이터라도 있다면 EEPROM에 데이터를 저장할 준비를 한다.
+  {
+	  if(++EEPROM_SAVE_TIMER >= 300) // 30ms 마다 EEPROM 데이터 저장 리스트에 있는 데이터를 저장한다.
+	  {
+		  EEPROM_SAVE_TIMER = 0;
+		  EVENT_CREATE(EEPORM_Data_List[EE_Save_Num]);
+		  if(++EE_Save_Num >= EE_Save_Cnt)
+		  {
+			  EE_Save_Num = 0;
+			  EE_Save_Cnt = 0;
+		  }
+	  }
+  }
+  
+  if(RESTART_HOME) // 10초 동안 아무런 움직임이 없으면 다시 홈화면으로 이동한다.
+  {
+	if(--RESTART_HOME <= 0)
+	{
+	  RESTART_HOME = 0;
+	  UP_DOWN_key_value_cnt = 1;
+	  WHAT_MODE = 0;
+	  USB_Dis_Cnt = 0;
+	  Event_Page = 1;
+	  memcpy(Tx_Data_List[List_Cnt], DATE_MONTH_ADJ_TEXT_BLACK, 13); // 시간 조정 화면의 날짜(월) 텍스트 검정색
+	  List_Cnt++;
+
+	  memcpy(Tx_Data_List[List_Cnt], DATE_DATE_ADJ_TEXT_BLACK, 13); // 시간 조정 화면의 날짜(일) 텍스트 검정색
+	  List_Cnt++;
+
+	  memcpy(Tx_Data_List[List_Cnt], TIME_HOUR_ADJ_TEXT_BLACK, 13); // 시간 조정 화면의 시간(시) 텍스트 검정색
+	  List_Cnt++;
+
+	  memcpy(Tx_Data_List[List_Cnt], TIME_MINUTE_ADJ_TEXT_BLACK, 13); // 시간 조정 화면의 시간(분) 텍스트 검정색
+	  List_Cnt++;
+
+	  memcpy(Tx_Data_List[List_Cnt], TIME_SEC_ADJ_TEXT_BLACK, 13); // 시간 조정 화면의 시간(초) 텍스트 검정색
+	  List_Cnt++;
+
+	  memcpy(Tx_Data_List[List_Cnt], DATE_YEAR_ADJ_TEXT_RED, 13); // 시간 조정 화면의 날짜(년) 텍스트 빨간색
+	  List_Cnt++;
+
+	  memcpy(Tx_Data_List[List_Cnt], SCREEN0_GO, 9); // 홈화면으로 이동
+	  List_Cnt++;
+	}
+  }
+  
+  if(EEPROM_WTimer == 1 && EEPROM_RTimer != 1)
+  {
+	if (++T10ms_cnt_2 >= 100) 
+	{
+	  T10ms_cnt_2 = 0;
+
+	  byte *mcu_address = (byte *)0x20000050;
+	  uint32_t eeprom_address = 0;
+	  uint32_t cal_address = 0;
+	  uint32_t add_num = 0;
+	  word save_p_type_cnt = 0;
+	  mcu_address = mcu_address + 0x00000040;  // MCU 주소 계산
+	  save_p_type_cnt = P_Type_Cnt;
+	  if(P_Type_Cnt >= 1000) // 999개 저장 완료 표시 이때 부터는 저장하는 방식이 달라짐
+	  {
+		save_p_type_cnt = P_Type_Cnt - 999;
+	  }
+	  add_num = save_p_type_cnt * 0x00000040;
+	  cal_address = 0x200000C0 + add_num;
+	  eeprom_address = (cal_address & 0x0000FFFF); // EEPROM 주소 계산
+
+	  EEPROM_WriteByte(eeprom_address, mcu_address, 64);
+
+	  EEPROM_WTimer = 0;
+	}
+  }
+  else if(EEPROM_WTimer != 1 && EEPROM_RTimer == 1)
+  {
+	if(++T10ms_cnt_2 >= 100)
+	{
+	  T10ms_cnt_2 = 0;
+	  word add_up_cnt = 0;
+	  word save_p_type_cnt = 0;
+	  word previous_add_up_cnt = 0;
+	  word previous_save_p_type_cnt = 0;
+	  save_p_type_cnt = P_Type_Cnt;
+	  if(P_Type_Cnt >= 1000) // 999개 저장 완료 표시 이때 부터는 EEPORM으로 부터 데이터를 불러오는 방식이 달라짐
+	  {
+		save_p_type_cnt = P_Type_Cnt - 999;
+		for(int i = save_p_type_cnt; i >= 1; i--) // 1000개 이상 부터가 최신이므로 999전까지 MCU에 내림차순으로 데이터 저장
+		{
+		  add_up_cnt++;
+		  byte *mcu_address = (byte *)0x20000050;
+		  uint32_t eeprom_address = 0;
+		  uint32_t cal_address = 0;
+		  uint32_t add_num = 0;
+		  uint32_t eeprom_add_num = 0;
+		  add_num = add_up_cnt * 0x00000040;
+		  mcu_address = mcu_address + add_num;  // MCU 주소 계산
+		  eeprom_add_num = i * 0x00000040; 
+		  cal_address = 0x200000C0 + eeprom_add_num;
+		  eeprom_address = cal_address & 0x0000FFFF; // EEPROM 주소 계산
+		  
+		  EEPROM_ReadByte(eeprom_address, mcu_address, 64);	// EEPROM에 저장된 P_Type_Receiver_Event 배열 데이터를 불러와서 CPU P_Type_Receiver_Event 주소에 저장
+		}
+		
+		previous_save_p_type_cnt = P_Type_Cnt - save_p_type_cnt;
+		previous_add_up_cnt = save_p_type_cnt;
+		for(int i = previous_save_p_type_cnt; i > save_p_type_cnt; i--) // 999부터 save_p_type_cnt 까지 MCU에 내림차순으로 데이터 저장
+		{
+		  previous_add_up_cnt++;
+		  byte *mcu_address = (byte *)0x20000050;
+		  uint32_t eeprom_address = 0;
+		  uint32_t cal_address = 0;
+		  uint32_t add_num = 0;
+		  uint32_t eeprom_add_num = 0;
+		  add_num = previous_add_up_cnt * 0x00000040;
+		  mcu_address = mcu_address + add_num;  // MCU 주소 계산
+		  eeprom_add_num = i * 0x00000040; 
+		  cal_address = 0x200000C0 + eeprom_add_num;
+		  eeprom_address = cal_address & 0x0000FFFF; // EEPROM 주소 계산
+		  
+		  EEPROM_ReadByte(eeprom_address, mcu_address, 64);	// EEPROM에 저장된 P_Type_Receiver_Event 배열 데이터를 불러와서 CPU P_Type_Receiver_Event 주소에 저장
+		}
+	  }
+	  else
+	  {
+		save_p_type_cnt = P_Type_Cnt;
+		for(int i = save_p_type_cnt; i >= 1; i--)
+		{
+		  add_up_cnt++;
+		  byte *mcu_address = (byte *)0x20000050;
+		  uint32_t eeprom_address = 0;
+		  uint32_t cal_address = 0;
+		  uint32_t add_num = 0;
+		  uint32_t eeprom_add_num = 0;
+		  add_num = add_up_cnt * 0x00000040;
+		  mcu_address = mcu_address + add_num;  // MCU 주소 계산
+		  eeprom_add_num = i * 0x00000040; 
+		  cal_address = 0x200000C0 + eeprom_add_num;
+		  eeprom_address = cal_address & 0x0000FFFF; // EEPROM 주소 계산
+		  
+		  EEPROM_ReadByte(eeprom_address, mcu_address, 64);	// EEPROM에 저장된 P_Type_Receiver_Event 배열 데이터를 불러와서 CPU P_Type_Receiver_Event 주소에 저장
+		}
+	  }
+	  EEPROM_RTimer = 0;
+	  // 기존 데이터 한 칸씩 아래로 밀기 (내림차순을 위해)
+	  for (int i = 1000; i > 1; i--)
+	  {
+		// 데이터 이동과 함께 번호도 갱신하여 내림차순으로 번호 설정
+		if (i <= 10) // 1의 자리
+		{
+			sprintf(P_Type_Data, "  %d. ", i-1);
+		}
+		else if (i > 10 && i <= 100) // 10의 자리
+		{
+			sprintf(P_Type_Data, " %d. ", i-1);
+		}
+		else if (i > 100) // 100의 자리
+		{
+			sprintf(P_Type_Data, "%d. ", i-1);
+		}
+		memcpy(P_Type_Receiver_Event[i], P_Type_Data, 5);
+	  }
+	}
+  }
+  
+  if(EN_H_L_24V_CNT)
+  {
+	if(--EN_H_L_24V_CNT == 0)
+	{
+	  EN_H_L_24V_CNT = 0;
+	  EN_H_24V;
+	  TB_IN_AD_FG = 1;
+	  if(TB1_Fire_Fg)
+	  {
+		TB1_Fire_Fg = 0;
+		TB1_Fire_Cnt = 0;
+		EEPORM_Data_List[EE_Save_Cnt] = 12; // P형 수신기 이벤트에 회로 1 정상 이벤트 추가 및 EEPROM에 저장
+		EE_Save_Cnt++;
+	  }
+	  if(TB2_Fire_Fg)
+	  {
+		TB2_Fire_Fg = 0;
+		TB2_Fire_Cnt = 0;
+		EEPORM_Data_List[EE_Save_Cnt] = 14; // P형 수신기 이벤트에 회로 2 정상 이벤트 추가 및 EEPROM에 저장
+		EE_Save_Cnt++;
+	  }
+	  if(TB3_Fire_Fg)
+	  {
+		TB3_Fire_Fg = 0;
+		TB3_Fire_Cnt = 0;
+		EEPORM_Data_List[EE_Save_Cnt] = 16; // P형 수신기 이벤트에 회로 3 정상 이벤트 추가 및 EEPROM에 저장
+		EE_Save_Cnt++;
+	  }
+	  if(TB4_Fire_Fg)
+	  {
+		TB4_Fire_Fg = 0;
+		TB4_Fire_Cnt = 0;
+		EEPORM_Data_List[EE_Save_Cnt] = 18; // P형 수신기 이벤트에 회로 4 정상 이벤트 추가 및 EEPROM에 저장
+		EE_Save_Cnt++;
+	  }
+	  if(TB5_Fire_Fg)
+	  {
+		TB5_Fire_Fg = 0;
+		TB5_Fire_Cnt = 0;
+		EEPORM_Data_List[EE_Save_Cnt] = 20; // P형 수신기 이벤트에 회로 5 정상 이벤트 추가 및 EEPROM에 저장
+		EE_Save_Cnt++;
+	  }
+	  if(TB6_Fire_Fg)
+	  {
+		TB6_Fire_Fg = 0;
+		TB6_Fire_Cnt = 0;
+		EEPORM_Data_List[EE_Save_Cnt] = 22; // P형 수신기 이벤트에 회로 6 정상 이벤트 추가 및 EEPROM에 저장
+		EE_Save_Cnt++;
+	  }
+	  if(TB7_Fire_Fg)
+	  {
+		TB7_Fire_Fg = 0;
+		TB7_Fire_Cnt = 0;
+		EEPORM_Data_List[EE_Save_Cnt] = 24; // P형 수신기 이벤트에 회로 7 정상 이벤트 추가 및 EEPROM에 저장
+		EE_Save_Cnt++;
+	  }
+	  if(TB8_Fire_Fg)
+	  {
+		TB8_Fire_Fg = 0;
+		TB8_Fire_Cnt = 0;
+		EEPORM_Data_List[EE_Save_Cnt] = 26; // P형 수신기 이벤트에 회로 8 정상 이벤트 추가 및 EEPROM에 저장
+		EE_Save_Cnt++;
+	  }
+	  if(TB9_Fire_Fg)
+	  {
+		TB9_Fire_Fg = 0;
+		TB9_Fire_Cnt = 0;
+		EEPORM_Data_List[EE_Save_Cnt] = 28; // P형 수신기 이벤트에 회로 9 정상 이벤트 추가 및 EEPROM에 저장
+		EE_Save_Cnt++;
+	  }
+	  if(TB10_Fire_Fg)
+	  {
+		TB10_Fire_Fg = 0;
+		TB10_Fire_Cnt = 0;
+		EEPORM_Data_List[EE_Save_Cnt] = 30; // P형 수신기 이벤트에 회로 10 정상 이벤트 추가 및 EEPROM에 저장
+		EE_Save_Cnt++;
+	  }
+	  if(TB_SEND_Fire_Fg)
+	  {
+		TB_SEND_Fire_Fg = 0;
+		TB_SEND_Fire_Cnt = 0;
+	  }
+	  
+	  TB_Fire_Cnt = 0; // 자동복구 기능 초기화
+	}
+  }
+  
+  if (++T500ms_cnt >= 5000) // 0.3s 타이머
+  {
+    T500ms_cnt = 0;
+
+    // 공통 상태 변수로 LED Toggle 제어
+    static bool led_toggle_state = false;
+    led_toggle_state = !led_toggle_state; // Toggle 상태 변경
+
+    // 도통부저 LED
+    /*if (Buzzer_all_the_way_TOG)
+    {
+        if (led_toggle_state)
+            SW_LED9_ON; // ON 상태
+        else
+            SW_LED9_OFF; // OFF 상태
+    }*/
+
+    // 주경종 LED
+    if (Main_bell_TOG)
+    {
+        if (led_toggle_state)
+            SW_LED4_ON;
+        else
+            SW_LED4_OFF;
+    }
+
+    // 지구경종 LED
+    if (Earth_alarm_bell_TOG)
+    {
+        if (led_toggle_state)
+            SW_LED3_ON;
+        else
+            SW_LED3_OFF;
+    }
+
+    // 유도등 LED
+    if (Guide_light_TOG)
+    {
+        if (led_toggle_state)
+            SW_LED2_ON;
+        else
+            SW_LED2_OFF;
+    }
+
+    // 화재이보 LED
+    if (Fire_report_TOG)
+    {
+		if (led_toggle_state)
+            SW_LED1_ON;
+        else
+            SW_LED1_OFF;
+    }
+	
+	// 축적 LED
+    if (Accumulation_TOG)
+    {
+        if (led_toggle_state)
+            MOD_LED4_ON;
+        else
+            MOD_LED4_OFF;
+    }
+	
+	// 동작시험 LED
+	if (Motion_test_TOG)
+    {
+        if (led_toggle_state)
+            SW_LED10_ON;
+        else
+            SW_LED10_OFF;
+    }
+	
+	// 자동복구 LED
+	if (Automatic_recovery_TOG)
+    {
+        if (led_toggle_state)
+            SW_LED9_ON;
+        else
+            SW_LED9_OFF;
+    }
+	
+    // 회로 1~10 단선 LED
+    if (IN_LED1_TOG_Fg)
+    {
+        if (led_toggle_state)
+            IN_LED1_ON;
+        else
+            IN_LED1_OFF;
+    }
+    if (IN_LED2_TOG_Fg)
+    {
+        if (led_toggle_state)
+            IN_LED2_ON;
+        else
+            IN_LED2_OFF;
+    }
+    if (IN_LED3_TOG_Fg)
+    {
+        if (led_toggle_state)
+            IN_LED3_ON;
+        else
+            IN_LED3_OFF;
+    }
+    if (IN_LED4_TOG_Fg)
+    {
+        if (led_toggle_state)
+            IN_LED4_ON;
+        else
+            IN_LED4_OFF;
+    }
+    if (IN_LED5_TOG_Fg)
+    {
+        if (led_toggle_state)
+            IN_LED5_ON;
+        else
+            IN_LED5_OFF;
+    }
+    if (IN_LED6_TOG_Fg)
+    {
+        if (led_toggle_state)
+            IN_LED6_ON;
+        else
+            IN_LED6_OFF;
+    }
+    if (IN_LED7_TOG_Fg)
+    {
+        if (led_toggle_state)
+            IN_LED7_ON;
+        else
+            IN_LED7_OFF;
+    }
+    if (IN_LED8_TOG_Fg)
+    {
+        if (led_toggle_state)
+            IN_LED8_ON;
+        else
+            IN_LED8_OFF;
+    }
+    if (IN_LED9_TOG_Fg)
+    {
+        if (led_toggle_state)
+            IN_LED9_ON;
+        else
+            IN_LED9_OFF;
+    }
+    if (IN_LED10_TOG_Fg)
+    {
+        if (led_toggle_state)
+            IN_LED10_ON;
+        else
+            IN_LED10_OFF;
+    }
+  }
+  
+  /**축적 기능 : 오보를 방지하기 위함, 감지기로 부터 화재 신호가 입력 되면 주경종만 20초간 동작한후, 20초후 여전히 화재 감지가 계속된다면 화재 신호가 입력된것으로 간주하여 화재시와 동일하게 동작한다.**/
+  /**축적시 화재가 났을때 20초간 타이머를 돌린다. 20초가 지난 후에 회로가 화재 감지인지 확인한다.**/
+  
+  if(TB1_Accumulation == 1 && TB1_Fire_Fg == 0)// 화재 이벤트가 아닐시에만 들어옴
+  {
+	  if(++TB1_Accumulation_Timer >= 200000) // 20초가 지난 후 회로가 화재 감지인지 확인
+	  {
+		  TB1_Accumulation = 0;
+		  TB1_Accumulation_Timer = 0;
+		  if(TB_IN_AD1 <= 1.0)
+		  {
+			  Accumulation_Fg_1 = 1;
+		  }
+		  else
+		  {
+			  IN_LED1_OFF;
+			  EEPORM_Data_List[EE_Save_Cnt] = 12; // P형 수신기 이벤트에 회로 정상 이벤트 추가 및 EEPROM에 저장
+			  EE_Save_Cnt++;
+			  if(!FIRE_CNT && Accumulation_MAIN_RY == 1) // 다른 회로 화재 감지가 아닐때만 주경종 OFF
+			  {
+				  EEPORM_Data_List[EE_Save_Cnt] = 36; // P형 수신기 이벤트에 주경종 출력 OFF 이벤트 추가 및 EEPROM에 저장
+			  	  EE_Save_Cnt++;
+				  MAIN_RY_L; // 주경종 OFF
+				  Accumulation_MAIN_RY = 0; // Accumulation_MAIN_RY 초기화
+			  }
+		  }
+	  }
+  }
+  
+  if(TB2_Accumulation == 1 && TB2_Fire_Fg == 0)// 화재 이벤트가 아닐시에만 들어옴
+  {
+	  if(++TB2_Accumulation_Timer >= 200000) // 20초가 지난 후 회로가 화재 감지인지 확인
+	  {
+		  TB2_Accumulation = 0;
+		  TB2_Accumulation_Timer = 0;
+		  if(TB_IN_AD2 <= 1.0)
+		  {
+			  Accumulation_Fg_2 = 1;
+		  }
+		  else
+		  {
+			  IN_LED2_OFF;
+			  EEPORM_Data_List[EE_Save_Cnt] = 14; // P형 수신기 이벤트에 회로 정상 이벤트 추가 및 EEPROM에 저장
+			  EE_Save_Cnt++;
+			  if(!FIRE_CNT && Accumulation_MAIN_RY == 1) // 다른 회로 화재 감지가 아닐때만 주경종 OFF
+			  {
+				  EEPORM_Data_List[EE_Save_Cnt] = 36; // P형 수신기 이벤트에 주경종 출력 OFF 이벤트 추가 및 EEPROM에 저장
+			  	  EE_Save_Cnt++;
+				  MAIN_RY_L; // 주경종 OFF
+				  Accumulation_MAIN_RY = 0; // Accumulation_MAIN_RY 초기화
+			  }
+		  }
+	  }
+  }
+  
+  if(TB3_Accumulation == 1 && TB3_Fire_Fg == 0)// 화재 이벤트가 아닐시에만 들어옴
+  {
+	  if(++TB3_Accumulation_Timer >= 200000) // 20초가 지난 후 회로가 화재 감지인지 확인
+	  {
+		  TB3_Accumulation = 0;
+		  TB3_Accumulation_Timer = 0;
+		  if(TB_IN_AD3 <= 1.0)
+		  {
+			  Accumulation_Fg_3 = 1;
+		  }
+		  else
+		  {
+			  IN_LED3_OFF;
+			  EEPORM_Data_List[EE_Save_Cnt] = 16; // P형 수신기 이벤트에 회로 정상 이벤트 추가 및 EEPROM에 저장
+			  EE_Save_Cnt++;
+			  if(!FIRE_CNT && Accumulation_MAIN_RY == 1) // 다른 회로 화재 감지가 아닐때만 주경종 OFF
+			  {
+				  EEPORM_Data_List[EE_Save_Cnt] = 36; // P형 수신기 이벤트에 주경종 출력 OFF 이벤트 추가 및 EEPROM에 저장
+			  	  EE_Save_Cnt++;
+				  MAIN_RY_L; // 주경종 OFF
+				  Accumulation_MAIN_RY = 0; // Accumulation_MAIN_RY 초기화
+			  }
+		  }
+	  }
+  }
+  
+  if(TB4_Accumulation == 1 && TB4_Fire_Fg == 0)// 화재 이벤트가 아닐시에만 들어옴
+  {
+	  if(++TB4_Accumulation_Timer >= 200000) // 20초가 지난 후 회로가 화재 감지인지 확인
+	  {
+		  TB4_Accumulation = 0;
+		  TB4_Accumulation_Timer = 0;
+		  if(TB_IN_AD4 <= 1.0)
+		  {
+			  Accumulation_Fg_4 = 1;
+		  }
+		  else
+		  {
+			  IN_LED4_OFF;
+			  EEPORM_Data_List[EE_Save_Cnt] = 18; // P형 수신기 이벤트에 회로 정상 이벤트 추가 및 EEPROM에 저장
+			  EE_Save_Cnt++;
+			  if(!FIRE_CNT && Accumulation_MAIN_RY == 1) // 다른 회로 화재 감지가 아닐때만 주경종 OFF
+			  {
+				  EEPORM_Data_List[EE_Save_Cnt] = 36; // P형 수신기 이벤트에 주경종 출력 OFF 이벤트 추가 및 EEPROM에 저장
+			  	  EE_Save_Cnt++;
+				  MAIN_RY_L; // 주경종 OFF
+				  Accumulation_MAIN_RY = 0; // Accumulation_MAIN_RY 초기화
+			  }
+		  }
+	  }
+  }
+  
+  if(TB5_Accumulation == 1 && TB5_Fire_Fg == 0)// 화재 이벤트가 아닐시에만 들어옴
+  {
+	  if(++TB5_Accumulation_Timer >= 200000) // 20초가 지난 후 회로가 화재 감지인지 확인
+	  {
+		  TB5_Accumulation = 0;
+		  TB5_Accumulation_Timer = 0;
+		  if(TB_IN_AD5 <= 1.0)
+		  {
+			  Accumulation_Fg_5 = 1;
+		  }
+		  else
+		  {
+			  IN_LED5_OFF;
+			  EEPORM_Data_List[EE_Save_Cnt] = 20; // P형 수신기 이벤트에 회로 정상 이벤트 추가 및 EEPROM에 저장
+			  EE_Save_Cnt++;
+			  if(!FIRE_CNT && Accumulation_MAIN_RY == 1) // 다른 회로 화재 감지가 아닐때만 주경종 OFF
+			  {
+				  EEPORM_Data_List[EE_Save_Cnt] = 36; // P형 수신기 이벤트에 주경종 출력 OFF 이벤트 추가 및 EEPROM에 저장
+			  	  EE_Save_Cnt++;
+				  MAIN_RY_L; // 주경종 OFF
+				  Accumulation_MAIN_RY = 0; // Accumulation_MAIN_RY 초기화
+			  }
+		  }
+	  }
+  }
+  
+  if(TB6_Accumulation == 1 && TB6_Fire_Fg == 0)// 화재 이벤트가 아닐시에만 들어옴
+  {
+	  if(++TB6_Accumulation_Timer >= 200000) // 20초가 지난 후 회로가 화재 감지인지 확인
+	  {
+		  TB6_Accumulation = 0;
+		  TB6_Accumulation_Timer = 0;
+		  if(TB_IN_AD6 <= 1.0)
+		  {
+			  Accumulation_Fg_6 = 1;
+		  }
+		  else
+		  {
+			  IN_LED6_OFF;
+			  EEPORM_Data_List[EE_Save_Cnt] = 22; // P형 수신기 이벤트에 회로 정상 이벤트 추가 및 EEPROM에 저장
+			  EE_Save_Cnt++;
+			  if(!FIRE_CNT && Accumulation_MAIN_RY == 1) // 다른 회로 화재 감지가 아닐때만 주경종 OFF
+			  {
+				  EEPORM_Data_List[EE_Save_Cnt] = 36; // P형 수신기 이벤트에 주경종 출력 OFF 이벤트 추가 및 EEPROM에 저장
+			  	  EE_Save_Cnt++;
+				  MAIN_RY_L; // 주경종 OFF
+				  Accumulation_MAIN_RY = 0; // Accumulation_MAIN_RY 초기화
+			  }
+		  }
+	  }
+  }
+  
+  if(TB7_Accumulation == 1 && TB7_Fire_Fg == 0)// 화재 이벤트가 아닐시에만 들어옴
+  {
+	  if(++TB7_Accumulation_Timer >= 200000) // 20초가 지난 후 회로가 화재 감지인지 확인
+	  {
+		  TB7_Accumulation = 0;
+		  TB7_Accumulation_Timer = 0;
+		  if(TB_IN_AD7 <= 1.0)
+		  {
+			  Accumulation_Fg_7 = 1;
+		  }
+		  else
+		  {
+			  IN_LED7_OFF;
+			  EEPORM_Data_List[EE_Save_Cnt] = 24; // P형 수신기 이벤트에 회로 정상 이벤트 추가 및 EEPROM에 저장
+			  EE_Save_Cnt++;
+			  if(!FIRE_CNT && Accumulation_MAIN_RY == 1) // 다른 회로 화재 감지가 아닐때만 주경종 OFF
+			  {
+				  EEPORM_Data_List[EE_Save_Cnt] = 36; // P형 수신기 이벤트에 주경종 출력 OFF 이벤트 추가 및 EEPROM에 저장
+			  	  EE_Save_Cnt++;
+				  MAIN_RY_L; // 주경종 OFF
+				  Accumulation_MAIN_RY = 0; // Accumulation_MAIN_RY 초기화
+			  }
+		  }
+	  }
+  }
+  
+  if(TB8_Accumulation == 1 && TB8_Fire_Fg == 0)// 화재 이벤트가 아닐시에만 들어옴
+  {
+	  if(++TB8_Accumulation_Timer >= 200000) // 20초가 지난 후 회로가 화재 감지인지 확인
+	  {
+		  TB8_Accumulation = 0;
+		  TB8_Accumulation_Timer = 0;
+		  if(TB_IN_AD8 <= 1.0)
+		  {
+			  Accumulation_Fg_8 = 1;
+		  }
+		  else
+		  {
+			  IN_LED8_OFF;
+			  EEPORM_Data_List[EE_Save_Cnt] = 26; // P형 수신기 이벤트에 회로 정상 이벤트 추가 및 EEPROM에 저장
+			  EE_Save_Cnt++;
+			  if(!FIRE_CNT && Accumulation_MAIN_RY == 1) // 다른 회로 화재 감지가 아닐때만 주경종 OFF
+			  {
+				  EEPORM_Data_List[EE_Save_Cnt] = 36; // P형 수신기 이벤트에 주경종 출력 OFF 이벤트 추가 및 EEPROM에 저장
+			  	  EE_Save_Cnt++;
+				  MAIN_RY_L; // 주경종 OFF
+				  Accumulation_MAIN_RY = 0; // Accumulation_MAIN_RY 초기화
+			  }
+		  }
+	  }
+  }
+  
+  if(TB9_Accumulation == 1 && TB9_Fire_Fg == 0)// 화재 이벤트가 아닐시에만 들어옴
+  {
+	  if(++TB9_Accumulation_Timer >= 200000) // 20초가 지난 후 회로가 화재 감지인지 확인
+	  {
+		  TB9_Accumulation = 0;
+		  TB9_Accumulation_Timer = 0;
+		  if(TB_IN_AD9 <= 1.0)
+		  {
+			  Accumulation_Fg_9 = 1;
+		  }
+		  else
+		  {
+			  IN_LED9_OFF;
+			  EEPORM_Data_List[EE_Save_Cnt] = 28; // P형 수신기 이벤트에 회로 정상 이벤트 추가 및 EEPROM에 저장
+			  EE_Save_Cnt++;
+			  if(!FIRE_CNT && Accumulation_MAIN_RY == 1) // 다른 회로 화재 감지가 아닐때만 주경종 OFF
+			  {
+				  EEPORM_Data_List[EE_Save_Cnt] = 36; // P형 수신기 이벤트에 주경종 출력 OFF 이벤트 추가 및 EEPROM에 저장
+			  	  EE_Save_Cnt++;
+				  MAIN_RY_L; // 주경종 OFF
+				  Accumulation_MAIN_RY = 0; // Accumulation_MAIN_RY 초기화
+			  }
+		  }
+	  }
+  }
+  
+  if(TB10_Accumulation == 1 && TB10_Fire_Fg == 0)// 화재 이벤트가 아닐시에만 들어옴
+  {
+	  if(++TB10_Accumulation_Timer >= 200000) // 20초가 지난 후 회로가 화재 감지인지 확인
+	  {
+		  TB10_Accumulation = 0;
+		  TB10_Accumulation_Timer = 0;
+		  if(TB_IN_AD10 <= 1.0)
+		  {
+			  Accumulation_Fg_10 = 1;
+		  }
+		  else
+		  {
+			  IN_LED10_OFF;
+			  EEPORM_Data_List[EE_Save_Cnt] = 30; // P형 수신기 이벤트에 회로 정상 이벤트 추가 및 EEPROM에 저장
+			  EE_Save_Cnt++;
+			  if(!FIRE_CNT && Accumulation_MAIN_RY == 1) // 다른 회로 화재 감지가 아닐때만 주경종 OFF
+			  {
+				  EEPORM_Data_List[EE_Save_Cnt] = 36; // P형 수신기 이벤트에 주경종 출력 OFF 이벤트 추가 및 EEPROM에 저장
+			  	  EE_Save_Cnt++;
+				  MAIN_RY_L; // 주경종 OFF
+				  Accumulation_MAIN_RY = 0; // Accumulation_MAIN_RY 초기화
+			  }
+		  }
+	  }
+  }
+  
+  /* USER CODE END TIM2_IRQn 0 */
+  //HAL_TIM_IRQHandler(&htim2);
+  /* USER CODE BEGIN TIM2_IRQn 1 */
+
+  /* USER CODE END TIM2_IRQn 1 */
+}
+
+/**
+  * @brief This function handles TIM3 global interrupt.
+  */
+void TIM3_IRQHandler(void)
+{
+  /* USER CODE BEGIN TIM3_IRQn 0 */
+
+  __HAL_TIM_CLEAR_FLAG(&htim3,TIM_FLAG_UPDATE);
+  
+  if(TB_IN_AD_FG)
+  {  
+	// ADC 시작(총 14개)
+  	HAL_ADC_Start_DMA(&hadc2, (uint32_t *)adcVal, 14); // 1 / (84MHZ * 480 Cycles * 14) = 0.5us 
+	
+	CAL_BAT_AD += adcVal[0];
+	CAL_TB_IN_AD1 += adcVal[1];
+	CAL_TB_IN_AD2 += adcVal[2];
+	CAL_TB_IN_AD3 += adcVal[3];
+	CAL_TB_IN_AD4 += adcVal[4];
+	CAL_TB_IN_AD5 += adcVal[5];
+	CAL_TB_IN_AD6 += adcVal[6]; 
+	CAL_TB_IN_AD7 += adcVal[7];  
+	CAL_TB_IN_AD8 += adcVal[8]; 
+	CAL_TB_IN_AD9 += adcVal[9];
+	CAL_TB_IN_AD10 += adcVal[10];
+	CAL_CHK_26V += adcVal[11];
+	CAL_TB_SEND_AD += adcVal[12];
+	CAL_COIN_AD += adcVal[13];
+ 
+	static unsigned int Time_1Sec_test = 0,CHK_BAT_Check_Fg = 0;
+
+	if(++TIM3_T1000ms_Timer >= 1000) // ADC 값을 1000번 더한값을 평균 내는 부분
+	{
+	  TIM3_T1000ms_Timer = 0;
+	  Time_1Sec_test++;
+	  
+	  if(Time_1Sec_test > 2)
+	  {
+		  CHK_BAT_Check_Fg = 1;
+	  }
+	
+	  AVR_BAT_AD = CAL_BAT_AD / 1000;
+	  AVR_TB_IN_AD1 = CAL_TB_IN_AD1 / 1000;
+	  AVR_TB_IN_AD2 = CAL_TB_IN_AD2 / 1000;
+	  AVR_TB_IN_AD3 = CAL_TB_IN_AD3 / 1000;
+	  AVR_TB_IN_AD4 = CAL_TB_IN_AD4 / 1000;
+	  AVR_TB_IN_AD5 = CAL_TB_IN_AD5 / 1000;
+	  AVR_TB_IN_AD6 = CAL_TB_IN_AD6 / 1000;
+	  AVR_TB_IN_AD7 = CAL_TB_IN_AD7 / 1000;
+	  AVR_TB_IN_AD8 = CAL_TB_IN_AD8 / 1000;
+	  AVR_TB_IN_AD9 = CAL_TB_IN_AD9 / 1000;
+	  AVR_TB_IN_AD10 = CAL_TB_IN_AD10 / 1000;
+	  AVR_CHK_26V = CAL_CHK_26V / 1000;
+	  AVR_TB_SEND_AD = CAL_TB_SEND_AD / 1000;
+	  AVR_COIN_AD = CAL_COIN_AD / 1000;
+	
+	  CAL_BAT_AD = 0;
+	  CAL_TB_IN_AD1 = 0;
+	  CAL_TB_IN_AD2 = 0;
+	  CAL_TB_IN_AD3 = 0;
+	  CAL_TB_IN_AD4 = 0;
+	  CAL_TB_IN_AD5 = 0;
+	  CAL_TB_IN_AD6 = 0;
+	  CAL_TB_IN_AD7 = 0;
+	  CAL_TB_IN_AD8 = 0;
+	  CAL_TB_IN_AD9 = 0;
+	  CAL_TB_IN_AD10 = 0;
+	  CAL_CHK_26V = 0;
+	  CAL_TB_SEND_AD = 0;
+	  CAL_COIN_AD = 0;
+	}
+
+	BAT_AD = (AVR_BAT_AD + 15.6) / 81.86; // BAT_AD 전압
+	TB_IN_AD1 = 3.3 * AVR_TB_IN_AD1 / 4095; // TB_IN_AD1 전압
+	TB_IN_AD2 = 3.3 * AVR_TB_IN_AD2 / 4095; // TB_IN_AD2 전압
+	TB_IN_AD3 = 3.3 * AVR_TB_IN_AD3 / 4095; // TB_IN_AD3 전압
+	TB_IN_AD4 = 3.3 * AVR_TB_IN_AD4 / 4095; // TB_IN_AD4 전압
+	TB_IN_AD5 = 3.3 * AVR_TB_IN_AD5 / 4095; // TB_IN_AD5 전압
+	TB_IN_AD6 = 3.3 * AVR_TB_IN_AD6 / 4095; // TB_IN_AD6 전압
+	TB_IN_AD7 = 3.3 * AVR_TB_IN_AD7 / 4095; // TB_IN_AD7 전압
+	TB_IN_AD8 = 3.3 * AVR_TB_IN_AD8 / 4095; // TB_IN_AD8 전압
+	TB_IN_AD9 = 3.3 * AVR_TB_IN_AD9 / 4095; // TB_IN_AD9 전압
+	TB_IN_AD10 = 3.3 * AVR_TB_IN_AD10 / 4095; // TB_IN_AD10 전압
+	CHK_26V = (AVR_CHK_26V + 15.6) / 81.86; // CHK_26V 전압
+	TB_SEND_AD = 3.3 * AVR_TB_SEND_AD / 4095; // TB_SEND_AD 전압
+	COIN_AD = 2 * 3.3 * AVR_COIN_AD / 4095; // COIN_AD 전압  
+
+	if(TB_IN_AD1 <= 1.0 && TB1_Fire_Fg == 0) // 회로1 화재
+	{
+	  if(++TB1_Fire_Cnt >= 1000) // 1초간 회로1 화재 신호가 들어오면 실행 
+	  {
+		TB1_Fire_Cnt = 0;
+		if(Accumulation_Key_Value == 1) // 축적 버튼이 눌렸다면 20초 타이머 설정 및 해당 회로 축적 중, 주경종 출력 ON 이벤트 추가
+		{
+			if(!Accumulation_Cnt) 
+			{
+				if(!TB1_Accumulation && !Accumulation_Fg_1)
+				{
+					TB1_Accumulation = 1; // 회로 축적중 , 주경종 출력 ON 이벤트 추가 한번만
+					IN_LED1_ON; // 회로 1 LED 출력
+					EEPORM_Data_List[EE_Save_Cnt] = 47; // P형 수신기 이벤트에 해당 회로 축적 중 이벤트 추가 및 EEPROM에 저장
+					EE_Save_Cnt++;
+					if(Accumulation_MAIN_RY == 0) // 이미 주경종 출력 중이면 더이상 출력 x
+					{
+						EEPORM_Data_List[EE_Save_Cnt] = 37; // P형 수신기 이벤트에 주경종 출력 ON 이벤트 추가 및 EEPROM에 저장
+						EE_Save_Cnt++;
+						MAIN_RY_H; // 주경종 출력
+						Accumulation_MAIN_RY = 1;
+					}
+				}
+			}
+			else // 축적 20초 후에 화재 감지시에는 다른 회로에서 화재 감지를 하면 축적하지 않고 바로 화재 이벤트를 추가한다.
+			{
+				if(!TB1_One_Time)
+				{
+					IN_LED1_ON; // 회로 1 LED 출력
+					EEPORM_Data_List[EE_Save_Cnt] = 13; // P형 수신기 이벤트에 회로 1 화재 이벤트 추가 및 EEPROM에 저장
+					EE_Save_Cnt++;
+					TB1_One_Time = 1;
+				}
+			}
+		}
+		if(!Accumulation_Key_Value || Accumulation_Fg_1 == 1) // 축적 중이 아닐때나 축적 20초 후에도 화재 감지시
+		{
+			TB1_Fire_Fg = 1;
+			FIRE_CNT = 1;
+			if(circulation_cnt == 0)
+			{
+			  circulation_cnt++;
+			  FIRE_NUM++;
+			}
+			if(TB1_Fire_Fg)
+			{
+			  // 홈화면에서 P형 수신기, 테바테크 글자 지우고 중간에 화재 빨간색 글씨로 출력
+			  memcpy(Tx_Data_List[List_Cnt], P_TYPE_RECIEVER_TEXT_Reset, 11); // P형 수신기 텍스트 초기화
+			  List_Cnt++;
+			  
+			  memcpy(Tx_Data_List[List_Cnt], TEVA_TECH_TEXT_Reset, 11); // 테바테크 텍스트 초기화
+			  List_Cnt++;
+			  
+			  memcpy(Tx_Data_List[List_Cnt], FIRE_TEXT_Send, 17); // 화재 텍스트 출력
+			  List_Cnt++;
+			  
+			  MOD_LED8_ON; // 화재 경보등1 LED 출력
+			  MOD_LED9_ON; // 화재 경보등2 LED 출력
+			  EEPORM_Data_List[EE_Save_Cnt] = 13; // P형 수신기 이벤트에 회로 1 화재 이벤트 추가 및 EEPROM에 저장
+			  EE_Save_Cnt++;
+			  IN_LED1_ON; // 회로 1 LED 출력
+			  if(MAIN_RY == 0) // 이미 주경종 출력 중이면 더이상 출력 x
+			  {
+				if(Main_bell_Key_Value == 1) // 주경종 SW ON상태일때인데 회로 화재라면
+				{
+				  Main_bell_Key_Value = 0;
+				  Main_bell_TOG = 0;
+				  SW_LED4_OFF;
+				}
+				// 화재시 유도등 LED OFF후 유도등 출력
+				SW_LED2_OFF;
+				Guide_light_Key_Value = 0;
+				Guide_light_TOG = 0;
+				
+				// 화재시 이보 LED OFF후 이보 출력
+				SW_LED1_OFF;
+				Fire_report_Key_Value = 0;
+				Fire_report_TOG = 0;
+				
+				MAIN_RY = 1; // MAIN_RY가 1이면 주경종 출력 중
+				if(!Accumulation_Fg_1)
+				{					
+					EEPORM_Data_List[EE_Save_Cnt] = 37; // P형 수신기 이벤트에 주경종 출력 ON 이벤트 추가 및 EEPROM에 저장
+					EE_Save_Cnt++;
+					MAIN_RY_H; // 주경종 출력
+				}
+				if(Earth_alarm_bell_Key_Value != 1) // 지구경종 SW OFF 일때만 지구경종 출력 및 이벤트 추가
+				{
+					EEPORM_Data_List[EE_Save_Cnt] = 35; // P형 수신기 이벤트에 지구경종 출력 ON 이벤트 추가 및 EEPROM에 저장
+					EE_Save_Cnt++;
+					LOCAL_RY_H; // 지구경종 출력
+				}
+				EEPORM_Data_List[EE_Save_Cnt] = 9; // P형 수신기 이벤트에 유도등 출력 ON 이벤트 추가 및 EEPROM에 저장
+				EE_Save_Cnt++;
+				GUID_RY_H; // 유도등 출력
+				EEPORM_Data_List[EE_Save_Cnt] = 33; // P형 수신기 이벤트에 이보 출력 ON 이벤트 추가 및 EEPROM에 저장
+				EE_Save_Cnt++;
+				FIRE_RY_H; // 이보 출력
+			  }
+			  /** 화재 시 회로 단선이면 다시 한번 단선 회로 이벤트 발생 **/
+			  if(TB_IN_AD1 >= 2.9) // 1회로 단선
+			  {
+				EEPORM_Data_List[EE_Save_Cnt] = 61; // P형 수신기 이벤트에 회로1 단선 이벤트 추가 및 EEPROM에 저장
+				EE_Save_Cnt++;
+			  }
+			}
+			if(Accumulation_Fg_1)
+			{
+				Accumulation_Cnt++; // 축적 후 화재 감지 변수 다른 회로에서 화재를 감지하면 축적하지 않음
+				Accumulation_Fg_1 = 0;
+			}
+		}
+	  }
+	}
+	
+	if(TB_IN_AD2 <= 1.0 && TB2_Fire_Fg == 0) // 회로2 화재
+	{
+	  if(++TB2_Fire_Cnt >= 1000) // 1초간 회로2 화재 신호가 들어오면 실행 
+	  {
+		TB2_Fire_Cnt = 0;
+		if(Accumulation_Key_Value == 1) // 축적 버튼이 눌렸다면 20초 타이머 설정 및 해당 회로 축적 중, 주경종 출력 ON 이벤트 추가
+		{
+			if(!Accumulation_Cnt) 
+			{
+				if(!TB2_Accumulation && !Accumulation_Fg_2)
+				{
+					TB2_Accumulation = 1; // 회로 축적중 , 주경종 출력 ON 이벤트 추가 한번만
+					IN_LED2_ON; // 회로 2 LED 출력
+					EEPORM_Data_List[EE_Save_Cnt] = 48; // P형 수신기 이벤트에 해당 회로 축적 중 이벤트 추가 및 EEPROM에 저장
+					EE_Save_Cnt++;
+					if(Accumulation_MAIN_RY == 0) // 이미 주경종 출력 중이면 더이상 출력 x
+					{
+						EEPORM_Data_List[EE_Save_Cnt] = 37; // P형 수신기 이벤트에 주경종 출력 ON 이벤트 추가 및 EEPROM에 저장
+						EE_Save_Cnt++;
+						MAIN_RY_H; // 주경종 출력
+						Accumulation_MAIN_RY = 1;
+					}
+				}
+			}
+			else // 축적 20초 후에 화재 감지시에는 다른 회로에서 화재 감지를 하면 축적하지 않고 바로 화재 이벤트를 추가한다.
+			{
+				if(!TB2_One_Time)
+				{
+				  IN_LED2_ON; // 회로 2 LED 출력
+				  EEPORM_Data_List[EE_Save_Cnt] = 15; // P형 수신기 이벤트에 회로 2 화재 이벤트 추가 및 EEPROM에 저장
+			      EE_Save_Cnt++;
+				  TB2_One_Time = 1;
+				}
+			}
+		}
+		if(!Accumulation_Key_Value || Accumulation_Fg_2 == 1) // 축적 중이 아닐때나 축적 20초 후에도 화재 감지시
+		{
+			TB2_Fire_Fg = 1;
+			FIRE_CNT = 1;
+			if(circulation_cnt == 0)
+			{
+			  circulation_cnt++;
+			  FIRE_NUM++;
+			}
+			if(TB2_Fire_Fg)
+			{
+			  // 홈화면에서 P형 수신기, 테바테크 글자 지우고 중간에 화재 빨간색 글씨로 출력
+			  memcpy(Tx_Data_List[List_Cnt], P_TYPE_RECIEVER_TEXT_Reset, 11); // P형 수신기 텍스트 초기화
+			  List_Cnt++;
+			  
+			  memcpy(Tx_Data_List[List_Cnt], TEVA_TECH_TEXT_Reset, 11); // 테바테크 텍스트 초기화
+			  List_Cnt++;
+			  
+			  memcpy(Tx_Data_List[List_Cnt], FIRE_TEXT_Send, 17); // 화재 텍스트 출력
+			  List_Cnt++;
+			  
+			  MOD_LED8_ON; // 화재 경보등1 LED 출력
+			  MOD_LED9_ON; // 화재 경보등2 LED 출력
+			  EEPORM_Data_List[EE_Save_Cnt] = 15; // P형 수신기 이벤트에 회로 2 화재 이벤트 추가 및 EEPROM에 저장
+			  EE_Save_Cnt++;
+			  IN_LED2_ON; // 회로 2 LED 출력
+			  if(MAIN_RY == 0)
+			  {
+				if(Main_bell_Key_Value == 1) // 주경종 SW ON상태일때인데 회로 화재라면
+				{
+				  Main_bell_Key_Value = 0;
+				  Main_bell_TOG = 0;
+				  SW_LED4_OFF;
+				}
+				// 화재시 유도등 LED OFF후 유도등 출력
+				SW_LED2_OFF;
+				Guide_light_Key_Value = 0;
+				Guide_light_TOG = 0;
+				
+				// 화재시 이보 LED OFF후 이보 출력
+				SW_LED1_OFF;
+				Fire_report_Key_Value = 0;
+				Fire_report_TOG = 0;
+				
+				MAIN_RY = 1; // MAIN_RY가 1이면 주경종 출력 중
+				if(!Accumulation_Fg_2)
+				{
+					EEPORM_Data_List[EE_Save_Cnt] = 37; // P형 수신기 이벤트에 주경종 출력 ON 이벤트 추가 및 EEPROM에 저장
+					EE_Save_Cnt++;
+					MAIN_RY_H; // 주경종 출력
+				}
+				if(Earth_alarm_bell_Key_Value != 1) // 지구경종 SW OFF 일때만 지구경종 출력 및 이벤트 추가
+				{
+					EEPORM_Data_List[EE_Save_Cnt] = 35; // P형 수신기 이벤트에 지구경종 출력 ON 이벤트 추가 및 EEPROM에 저장
+					EE_Save_Cnt++;
+					LOCAL_RY_H; // 지구경종 출력
+				}
+				EEPORM_Data_List[EE_Save_Cnt] = 9; // P형 수신기 이벤트에 유도등 출력 ON 이벤트 추가 및 EEPROM에 저장
+				EE_Save_Cnt++;
+				GUID_RY_H; // 유도등 출력
+				EEPORM_Data_List[EE_Save_Cnt] = 33; // P형 수신기 이벤트에 이보 출력 ON 이벤트 추가 및 EEPROM에 저장
+				EE_Save_Cnt++;
+				FIRE_RY_H; // 이보 출력
+			  }
+			  /** 화재 시 회로 단선이면 다시 한번 단선 회로 이벤트 발생 **/		
+			  if(TB_IN_AD2 >= 2.9) // 2회로 단선
+			  {
+				EEPORM_Data_List[EE_Save_Cnt] = 62; // P형 수신기 이벤트에 회로2 단선 이벤트 추가 및 EEPROM에 저장
+				EE_Save_Cnt++;
+			  }
+			}
+			if(Accumulation_Fg_2)
+			{
+				Accumulation_Cnt++; // 축적 후 화재 감지 변수 다른 회로에서 화재를 감지하면 축적하지 않음
+				Accumulation_Fg_2 = 0;
+			}
+		}
+	  }
+	}
+	
+	if(TB_IN_AD3 <= 1.0 && TB3_Fire_Fg == 0) // 회로3 화재
+	{
+	  if(++TB3_Fire_Cnt >= 1000) // 1초간 회로3 화재 신호가 들어오면 실행 
+	  {
+		TB3_Fire_Cnt = 0;
+		if(Accumulation_Key_Value == 1) // 축적 버튼이 눌렸다면 20초 타이머 설정 및 해당 회로 축적 중, 주경종 출력 ON 이벤트 추가
+		{
+			if(!Accumulation_Cnt) 
+			{
+				if(!TB3_Accumulation && !Accumulation_Fg_3)
+				{
+					TB3_Accumulation = 1; // 회로 축적중 , 주경종 출력 ON 이벤트 추가 한번만
+					IN_LED3_ON; // 회로 1 LED 출력
+					EEPORM_Data_List[EE_Save_Cnt] = 49; // P형 수신기 이벤트에 해당 회로 축적 중 이벤트 추가 및 EEPROM에 저장
+					EE_Save_Cnt++;
+					if(Accumulation_MAIN_RY == 0) // 이미 주경종 출력 중이면 더이상 출력 x
+					{
+						EEPORM_Data_List[EE_Save_Cnt] = 37; // P형 수신기 이벤트에 주경종 출력 ON 이벤트 추가 및 EEPROM에 저장
+						EE_Save_Cnt++;
+						MAIN_RY_H; // 주경종 출력
+						Accumulation_MAIN_RY = 1;
+					}
+				}
+			}
+			else // 축적 20초 후에 화재 감지시에는 다른 회로에서 화재 감지를 하면 축적하지 않고 바로 화재 이벤트를 추가한다.
+			{
+				if(!TB3_One_Time)
+				{
+				  IN_LED3_ON; // 회로 3 LED 출력
+				  EEPORM_Data_List[EE_Save_Cnt] = 17; // P형 수신기 이벤트에 회로 3 화재 이벤트 추가 및 EEPROM에 저장
+			  	  EE_Save_Cnt++;
+				  TB3_One_Time = 1;
+				}
+			}
+		}
+		if(!Accumulation_Key_Value || Accumulation_Fg_3 == 1) // 축적 중이 아닐때나 축적 20초 후에도 화재 감지시
+		{
+			TB3_Fire_Fg = 1;
+			FIRE_CNT = 1;
+			if(circulation_cnt == 0)
+			{
+			  circulation_cnt++;
+			  FIRE_NUM++;
+			}
+			if(TB3_Fire_Fg)
+			{
+			  // 홈화면에서 P형 수신기, 테바테크 글자 지우고 중간에 화재 빨간색 글씨로 출력
+			  memcpy(Tx_Data_List[List_Cnt], P_TYPE_RECIEVER_TEXT_Reset, 11); // P형 수신기 텍스트 초기화
+			  List_Cnt++;
+			  
+			  memcpy(Tx_Data_List[List_Cnt], TEVA_TECH_TEXT_Reset, 11); // 테바테크 텍스트 초기화
+			  List_Cnt++;
+			  
+			  memcpy(Tx_Data_List[List_Cnt], FIRE_TEXT_Send, 17); // 화재 텍스트 출력
+			  List_Cnt++;
+			  
+			  MOD_LED8_ON; // 화재 경보등1 LED 출력
+			  MOD_LED9_ON; // 화재 경보등2 LED 출력
+			  EEPORM_Data_List[EE_Save_Cnt] = 17; // P형 수신기 이벤트에 회로 3 화재 이벤트 추가 및 EEPROM에 저장
+			  EE_Save_Cnt++;
+			  IN_LED3_ON; // 회로 3 LED 출력
+			  if(MAIN_RY == 0) // 이미 주경종 출력 중이면 더이상 출력 x
+			  {
+				if(Main_bell_Key_Value == 1) // 주경종 SW ON상태일때인데 회로 화재라면
+				{
+				  Main_bell_Key_Value = 0;
+				  Main_bell_TOG = 0;
+				  SW_LED4_OFF;
+				}
+				// 화재시 유도등 LED OFF후 유도등 출력
+				SW_LED2_OFF;
+				Guide_light_Key_Value = 0;
+				Guide_light_TOG = 0;
+				
+				// 화재시 이보 LED OFF후 이보 출력
+				SW_LED1_OFF;
+				Fire_report_Key_Value = 0;
+				Fire_report_TOG = 0;
+				
+				MAIN_RY = 1; // MAIN_RY가 1이면 주경종 출력 중
+				if(!Accumulation_Fg_3)
+				{
+					EEPORM_Data_List[EE_Save_Cnt] = 37; // P형 수신기 이벤트에 주경종 출력 ON 이벤트 추가 및 EEPROM에 저장
+					EE_Save_Cnt++;
+					MAIN_RY_H; // 주경종 출력
+				}
+				if(Earth_alarm_bell_Key_Value != 1) // 지구경종 SW OFF 일때만 지구경종 출력 및 이벤트 추가
+				{
+					EEPORM_Data_List[EE_Save_Cnt] = 35; // P형 수신기 이벤트에 지구경종 출력 ON 이벤트 추가 및 EEPROM에 저장
+					EE_Save_Cnt++;
+					LOCAL_RY_H; // 지구경종 출력
+				}
+				EEPORM_Data_List[EE_Save_Cnt] = 9; // P형 수신기 이벤트에 유도등 출력 ON 이벤트 추가 및 EEPROM에 저장
+				EE_Save_Cnt++;
+				GUID_RY_H; // 유도등 출력
+				EEPORM_Data_List[EE_Save_Cnt] = 33; // P형 수신기 이벤트에 이보 출력 ON 이벤트 추가 및 EEPROM에 저장
+				EE_Save_Cnt++;
+				FIRE_RY_H; // 이보 출력
+			  }
+			  /** 화재 시 회로 단선이면 다시 한번 단선 회로 이벤트 발생 **/
+			  if(TB_IN_AD3 >= 2.9) // 3회로 단선
+			  {
+				EEPORM_Data_List[EE_Save_Cnt] = 63; // P형 수신기 이벤트에 회로3 단선 이벤트 추가 및 EEPROM에 저장
+				EE_Save_Cnt++;
+			  }
+			}
+			if(Accumulation_Fg_3)
+			{
+				Accumulation_Cnt++; // 축적 후 화재 감지 변수 다른 회로에서 화재를 감지하면 축적하지 않음
+				Accumulation_Fg_3 = 0;
+			}
+		}
+	  }
+	}
+	
+	if(TB_IN_AD4 <= 1.0 && TB4_Fire_Fg == 0) // 회로4 화재
+	{
+	  if(++TB4_Fire_Cnt >= 1000) // 1초간 회로4 화재 신호가 들어오면 실행 
+	  {
+		TB4_Fire_Cnt = 0;
+		if(Accumulation_Key_Value == 1) // 축적 버튼이 눌렸다면 20초 타이머 설정 및 해당 회로 축적 중, 주경종 출력 ON 이벤트 추가
+		{
+			if(!Accumulation_Cnt) 
+			{
+				if(!TB4_Accumulation && !Accumulation_Fg_4)
+				{
+					TB4_Accumulation = 1; // 회로 축적중 , 주경종 출력 ON 이벤트 추가 한번만
+					IN_LED4_ON; // 회로 4 LED 출력
+					EEPORM_Data_List[EE_Save_Cnt] = 50; // P형 수신기 이벤트에 해당 회로 축적 중 이벤트 추가 및 EEPROM에 저장
+					EE_Save_Cnt++;
+					if(Accumulation_MAIN_RY == 0) // 이미 주경종 출력 중이면 더이상 출력 x
+					{
+						EEPORM_Data_List[EE_Save_Cnt] = 37; // P형 수신기 이벤트에 주경종 출력 ON 이벤트 추가 및 EEPROM에 저장
+						EE_Save_Cnt++;
+						MAIN_RY_H; // 주경종 출력
+						Accumulation_MAIN_RY = 1;
+					}
+				}
+			}
+			else // 축적 20초 후에 화재 감지시에는 다른 회로에서 화재 감지를 하면 축적하지 않고 바로 화재 이벤트를 추가한다.
+			{
+				if(!TB4_One_Time)
+				{
+				  IN_LED4_ON; // 회로 4 LED 출력
+				  EEPORM_Data_List[EE_Save_Cnt] = 19; // P형 수신기 이벤트에 회로 4 화재 이벤트 추가 및 EEPROM에 저장
+			      EE_Save_Cnt++;
+				  TB4_One_Time = 1;
+				}
+			}
+		}
+		if(!Accumulation_Key_Value || Accumulation_Fg_4 == 1) // 축적 중이 아닐때나 축적 20초 후에도 화재 감지시
+		{
+			TB4_Fire_Fg = 1;
+			FIRE_CNT = 1;
+			if(circulation_cnt == 0)
+			{
+			  circulation_cnt++;
+			  FIRE_NUM++;
+			}
+			if(TB4_Fire_Fg)
+			{
+			  // 홈화면에서 P형 수신기, 테바테크 글자 지우고 중간에 화재 빨간색 글씨로 출력
+			  memcpy(Tx_Data_List[List_Cnt], P_TYPE_RECIEVER_TEXT_Reset, 11); // P형 수신기 텍스트 초기화
+			  List_Cnt++;
+			  
+			  memcpy(Tx_Data_List[List_Cnt], TEVA_TECH_TEXT_Reset, 11); // 테바테크 텍스트 초기화
+			  List_Cnt++;
+			  
+			  memcpy(Tx_Data_List[List_Cnt], FIRE_TEXT_Send, 17); // 화재 텍스트 출력
+			  List_Cnt++;
+			  
+			  MOD_LED8_ON; // 화재 경보등1 LED 출력
+			  MOD_LED9_ON; // 화재 경보등2 LED 출력
+			  EEPORM_Data_List[EE_Save_Cnt] = 19; // P형 수신기 이벤트에 회로 4 화재 이벤트 추가 및 EEPROM에 저장
+			  EE_Save_Cnt++;
+			  IN_LED4_ON; // 회로 4 LED 출력
+			  if(MAIN_RY == 0)
+			  {
+				if(Main_bell_Key_Value == 1) // 주경종 SW ON상태일때인데 회로 화재라면
+				{
+				  Main_bell_Key_Value = 0;
+				  Main_bell_TOG = 0;
+				  SW_LED4_OFF;
+				}
+				// 화재시 유도등 LED OFF후 유도등 출력
+				SW_LED2_OFF;
+				Guide_light_Key_Value = 0;
+				Guide_light_TOG = 0;
+				
+				// 화재시 이보 LED OFF후 이보 출력
+				SW_LED1_OFF;
+				Fire_report_Key_Value = 0;
+				Fire_report_TOG = 0;
+				
+				MAIN_RY = 1; // MAIN_RY가 1이면 주경종 출력 중
+				if(!Accumulation_Fg_4)
+				{					
+					EEPORM_Data_List[EE_Save_Cnt] = 37; // P형 수신기 이벤트에 주경종 출력 ON 이벤트 추가 및 EEPROM에 저장
+					EE_Save_Cnt++;
+					MAIN_RY_H; // 주경종 출력
+				}
+				if(Earth_alarm_bell_Key_Value != 1) // 지구경종 SW OFF 일때만 지구경종 출력 및 이벤트 추가
+				{
+					EEPORM_Data_List[EE_Save_Cnt] = 35; // P형 수신기 이벤트에 지구경종 출력 ON 이벤트 추가 및 EEPROM에 저장
+					EE_Save_Cnt++;
+					LOCAL_RY_H; // 지구경종 출력
+				}
+				EEPORM_Data_List[EE_Save_Cnt] = 9; // P형 수신기 이벤트에 유도등 출력 ON 이벤트 추가 및 EEPROM에 저장
+				EE_Save_Cnt++;
+				GUID_RY_H; // 유도등 출력
+				EEPORM_Data_List[EE_Save_Cnt] = 33; // P형 수신기 이벤트에 이보 출력 ON 이벤트 추가 및 EEPROM에 저장
+				EE_Save_Cnt++;
+				FIRE_RY_H; // 이보 출력
+			  }
+			  /** 화재 시 회로 단선이면 다시 한번 단선 회로 이벤트 발생 **/
+			  if(TB_IN_AD4 >= 2.9) // 4회로 단선
+			  {
+				EEPORM_Data_List[EE_Save_Cnt] = 64; // P형 수신기 이벤트에 회로4 단선 이벤트 추가 및 EEPROM에 저장
+				EE_Save_Cnt++;
+			  }
+			}
+			if(Accumulation_Fg_4)
+			{
+				Accumulation_Cnt++; // 축적 후 화재 감지 변수 다른 회로에서 화재를 감지하면 축적하지 않음
+				Accumulation_Fg_4 = 0;
+			}
+		}
+	  }
+	}
+	
+	if(TB_IN_AD5 <= 1.0 && TB5_Fire_Fg == 0) // 회로5 화재
+	{
+	  if(++TB5_Fire_Cnt >= 1000) // 1초간 회로5 화재 신호가 들어오면 실행 
+	  {
+		TB5_Fire_Cnt = 0;
+		if(Accumulation_Key_Value == 1) // 축적 버튼이 눌렸다면 20초 타이머 설정 및 해당 회로 축적 중, 주경종 출력 ON 이벤트 추가
+		{
+			if(!Accumulation_Cnt) 
+			{
+				if(!TB5_Accumulation && !Accumulation_Fg_5)
+				{
+					TB5_Accumulation = 1; // 회로 축적중 , 주경종 출력 ON 이벤트 추가 한번만
+					IN_LED5_ON; // 회로 5 LED 출력
+					EEPORM_Data_List[EE_Save_Cnt] = 51; // P형 수신기 이벤트에 해당 회로 축적 중 이벤트 추가 및 EEPROM에 저장
+					EE_Save_Cnt++;
+					if(Accumulation_MAIN_RY == 0) // 이미 주경종 출력 중이면 더이상 출력 x
+					{
+						EEPORM_Data_List[EE_Save_Cnt] = 37; // P형 수신기 이벤트에 주경종 출력 ON 이벤트 추가 및 EEPROM에 저장
+						EE_Save_Cnt++;
+						MAIN_RY_H; // 주경종 출력
+						Accumulation_MAIN_RY = 1;
+					}
+				}
+			}
+			else // 축적 20초 후에 화재 감지시에는 다른 회로에서 화재 감지를 하면 축적하지 않고 바로 화재 이벤트를 추가한다.
+			{
+				if(!TB5_One_Time)
+				{
+					IN_LED5_ON; // 회로 5 LED 출력
+					EEPORM_Data_List[EE_Save_Cnt] = 21; // P형 수신기 이벤트에 회로 5 화재 이벤트 추가 및 EEPROM에 저장
+					EE_Save_Cnt++;
+					TB5_One_Time = 1;
+				}
+			}
+		}
+		if(!Accumulation_Key_Value || Accumulation_Fg_5 == 1) // 축적 중이 아닐때나 축적 20초 후에도 화재 감지시
+		{
+			TB5_Fire_Fg = 1;
+			FIRE_CNT = 1;
+			if(circulation_cnt == 0)
+			{
+			  circulation_cnt++;
+			  FIRE_NUM++;
+			}
+			if(TB5_Fire_Fg)
+			{
+			  // 홈화면에서 P형 수신기, 테바테크 글자 지우고 중간에 화재 빨간색 글씨로 출력
+			  memcpy(Tx_Data_List[List_Cnt], P_TYPE_RECIEVER_TEXT_Reset, 11); // P형 수신기 텍스트 초기화
+			  List_Cnt++;
+			  
+			  memcpy(Tx_Data_List[List_Cnt], TEVA_TECH_TEXT_Reset, 11); // 테바테크 텍스트 초기화
+			  List_Cnt++;
+			  
+			  memcpy(Tx_Data_List[List_Cnt], FIRE_TEXT_Send, 17); // 화재 텍스트 출력
+			  List_Cnt++;
+			  
+			  MOD_LED8_ON; // 화재 경보등1 LED 출력
+			  MOD_LED9_ON; // 화재 경보등2 LED 출력
+			  EEPORM_Data_List[EE_Save_Cnt] = 21; // P형 수신기 이벤트에 회로 5 화재 이벤트 추가 및 EEPROM에 저장
+			  EE_Save_Cnt++;
+			  IN_LED5_ON; // 회로 5 LED 출력
+			  if(MAIN_RY == 0) // 이미 주경종 출력 중이면 더이상 출력 x
+			  {
+				if(Main_bell_Key_Value == 1) // 주경종 SW ON상태일때인데 회로 화재라면
+				{
+				  Main_bell_Key_Value = 0;
+				  Main_bell_TOG = 0;
+				  SW_LED4_OFF;
+				}
+				// 화재시 유도등 LED OFF후 유도등 출력
+				SW_LED2_OFF;
+				Guide_light_Key_Value = 0;
+				Guide_light_TOG = 0;
+				
+				// 화재시 이보 LED OFF후 이보 출력
+				SW_LED1_OFF;
+				Fire_report_Key_Value = 0;
+				Fire_report_TOG = 0;
+				
+				MAIN_RY = 1; // MAIN_RY가 1이면 주경종 출력 중
+				if(!Accumulation_Fg_5)
+				{					
+					EEPORM_Data_List[EE_Save_Cnt] = 37; // P형 수신기 이벤트에 주경종 출력 ON 이벤트 추가 및 EEPROM에 저장
+					EE_Save_Cnt++;
+					MAIN_RY_H; // 주경종 출력
+				}
+				if(Earth_alarm_bell_Key_Value != 1) // 지구경종 SW OFF 일때만 지구경종 출력 및 이벤트 추가
+				{
+					EEPORM_Data_List[EE_Save_Cnt] = 35; // P형 수신기 이벤트에 지구경종 출력 ON 이벤트 추가 및 EEPROM에 저장
+					EE_Save_Cnt++;
+					LOCAL_RY_H; // 지구경종 출력
+				}
+				EEPORM_Data_List[EE_Save_Cnt] = 9; // P형 수신기 이벤트에 유도등 출력 ON 이벤트 추가 및 EEPROM에 저장
+				EE_Save_Cnt++;
+				GUID_RY_H; // 유도등 출력
+				EEPORM_Data_List[EE_Save_Cnt] = 33; // P형 수신기 이벤트에 이보 출력 ON 이벤트 추가 및 EEPROM에 저장
+				EE_Save_Cnt++;
+				FIRE_RY_H; // 이보 출력;
+			  }
+			  /** 화재 시 회로 단선이면 다시 한번 단선 회로 이벤트 발생 **/
+			  if(TB_IN_AD5 >= 2.9) // 5회로 단선
+			  {
+				EEPORM_Data_List[EE_Save_Cnt] = 65; // P형 수신기 이벤트에 회로5 단선 이벤트 추가 및 EEPROM에 저장
+				EE_Save_Cnt++;
+			  }
+			}
+			if(Accumulation_Fg_5)
+			{
+				Accumulation_Cnt++; // 축적 후 화재 감지 변수 다른 회로에서 화재를 감지하면 축적하지 않음
+				Accumulation_Fg_5 = 0;
+			}
+		}
+	  }
+	}
+	
+	if (TB_IN_AD6 <= 1.0 && TB6_Fire_Fg == 0) // 회로6 화재
+	{
+	  if(++TB6_Fire_Cnt >= 1000) // 1초간 회로6 화재 신호가 들어오면 실행 
+	  {
+		TB6_Fire_Cnt = 0;
+		if(Accumulation_Key_Value == 1) // 축적 버튼이 눌렸다면 20초 타이머 설정 및 해당 회로 축적 중, 주경종 출력 ON 이벤트 추가
+		{
+			if(!Accumulation_Cnt) 
+			{
+				if(!TB6_Accumulation && !Accumulation_Fg_6)
+				{
+					TB6_Accumulation = 1; // 회로 축적중 , 주경종 출력 ON 이벤트 추가 한번만
+					IN_LED6_ON; // 회로 6 LED 출력
+					EEPORM_Data_List[EE_Save_Cnt] = 52; // P형 수신기 이벤트에 해당 회로 축적 중 이벤트 추가 및 EEPROM에 저장
+					EE_Save_Cnt++;
+					if(Accumulation_MAIN_RY == 0) // 이미 주경종 출력 중이면 더이상 출력 x
+					{
+						EEPORM_Data_List[EE_Save_Cnt] = 37; // P형 수신기 이벤트에 주경종 출력 ON 이벤트 추가 및 EEPROM에 저장
+						EE_Save_Cnt++;
+						MAIN_RY_H; // 주경종 출력
+						Accumulation_MAIN_RY = 1;
+					}
+				}
+			}
+			else // 축적 20초 후에 화재 감지시에는 다른 회로에서 화재 감지를 하면 축적하지 않고 바로 화재 이벤트를 추가한다.
+			{
+				if(!TB6_One_Time)
+				{
+					IN_LED6_ON; // 회로 6 LED 출력
+					EEPORM_Data_List[EE_Save_Cnt] = 23; // P형 수신기 이벤트에 회로 6 화재 이벤트 추가 및 EEPROM에 저장
+			  		EE_Save_Cnt++;
+					TB6_One_Time = 1;
+				}
+			}
+		}
+		if(!Accumulation_Key_Value || Accumulation_Fg_6 == 1) // 축적 중이 아닐때나 축적 20초 후에도 화재 감지시
+		{
+			TB6_Fire_Fg = 1;
+			FIRE_CNT = 1;
+			if(circulation_cnt == 0)
+			{
+			  circulation_cnt++;
+			  FIRE_NUM++;
+			}
+			if(TB6_Fire_Fg)
+			{
+			  // 홈화면에서 P형 수신기, 테바테크 글자 지우고 중간에 화재 빨간색 글씨로 출력
+			  memcpy(Tx_Data_List[List_Cnt], P_TYPE_RECIEVER_TEXT_Reset, 11); // P형 수신기 텍스트 초기화
+			  List_Cnt++;
+			  
+			  memcpy(Tx_Data_List[List_Cnt], TEVA_TECH_TEXT_Reset, 11); // 테바테크 텍스트 초기화
+			  List_Cnt++;
+			  
+			  memcpy(Tx_Data_List[List_Cnt], FIRE_TEXT_Send, 17); // 화재 텍스트 출력
+			  List_Cnt++;
+			  
+			  MOD_LED8_ON; // 화재 경보등1 LED 출력
+			  MOD_LED9_ON; // 화재 경보등2 LED 출력
+			  EEPORM_Data_List[EE_Save_Cnt] = 23; // P형 수신기 이벤트에 회로 6 화재 이벤트 추가 및 EEPROM에 저장
+			  EE_Save_Cnt++;
+			  IN_LED6_ON; // 회로 6 LED 출력
+			  if(MAIN_RY == 0) // 이미 주경종 출력 중이면 더이상 출력 x
+			  {
+				if(Main_bell_Key_Value == 1) // 주경종 SW ON상태일때인데 회로 화재라면
+				{
+				  Main_bell_Key_Value = 0;
+				  Main_bell_TOG = 0;
+				  SW_LED4_OFF;
+				}
+				// 화재시 유도등 LED OFF후 유도등 출력
+				SW_LED2_OFF;
+				Guide_light_Key_Value = 0;
+				Guide_light_TOG = 0;
+				
+				// 화재시 이보 LED OFF후 이보 출력
+				SW_LED1_OFF;
+				Fire_report_Key_Value = 0;
+				Fire_report_TOG = 0;
+				
+				MAIN_RY = 1; // MAIN_RY가 1이면 주경종 출력 중
+				if(!Accumulation_Fg_6)
+				{					
+					EEPORM_Data_List[EE_Save_Cnt] = 37; // P형 수신기 이벤트에 주경종 출력 ON 이벤트 추가 및 EEPROM에 저장
+					EE_Save_Cnt++;
+					MAIN_RY_H; // 주경종 출력
+				}
+				if(Earth_alarm_bell_Key_Value != 1) // 지구경종 SW OFF 일때만 지구경종 출력 및 이벤트 추가
+				{
+					EEPORM_Data_List[EE_Save_Cnt] = 35; // P형 수신기 이벤트에 지구경종 출력 ON 이벤트 추가 및 EEPROM에 저장
+					EE_Save_Cnt++;
+					LOCAL_RY_H; // 지구경종 출력
+				}
+				EEPORM_Data_List[EE_Save_Cnt] = 9; // P형 수신기 이벤트에 유도등 출력 ON 이벤트 추가 및 EEPROM에 저장
+				EE_Save_Cnt++;
+				GUID_RY_H; // 유도등 출력
+				EEPORM_Data_List[EE_Save_Cnt] = 33; // P형 수신기 이벤트에 이보 출력 ON 이벤트 추가 및 EEPROM에 저장
+				EE_Save_Cnt++;
+				FIRE_RY_H; // 이보 출력
+			  }
+			  /** 화재 시 회로 단선이면 다시 한번 단선 회로 이벤트 발생 **/			
+			  if(TB_IN_AD6 >= 2.9) // 6회로 단선
+			  {
+				EEPORM_Data_List[EE_Save_Cnt] = 66; // P형 수신기 이벤트에 회로6 단선 이벤트 추가 및 EEPROM에 저장
+				EE_Save_Cnt++;
+			  }
+			}
+			if(Accumulation_Fg_6)
+			{
+				Accumulation_Cnt++; // 축적 후 화재 감지 변수 다른 회로에서 화재를 감지하면 축적하지 않음
+				Accumulation_Fg_6 = 0;
+			}
+		}
+	  }
+	}
+	
+	if(TB_IN_AD7 <= 1.0 && TB7_Fire_Fg == 0) // 회로7 화재
+	{
+	  if(++TB7_Fire_Cnt >= 1000) // 1초간 회로7 화재 신호가 들어오면 실행 
+	  {
+		TB7_Fire_Cnt = 0;
+		if(Accumulation_Key_Value == 1) // 축적 버튼이 눌렸다면 20초 타이머 설정 및 해당 회로 축적 중, 주경종 출력 ON 이벤트 추가
+		{
+			if(!Accumulation_Cnt) 
+			{
+				if(!TB7_Accumulation && !Accumulation_Fg_7)
+				{
+					TB7_Accumulation = 1; // 회로 축적중 , 주경종 출력 ON 이벤트 추가 한번만
+					IN_LED7_ON; // 회로 7 LED 출력
+					EEPORM_Data_List[EE_Save_Cnt] = 53; // P형 수신기 이벤트에 해당 회로 축적 중 이벤트 추가 및 EEPROM에 저장
+					EE_Save_Cnt++;
+					if(Accumulation_MAIN_RY == 0) // 이미 주경종 출력 중이면 더이상 출력 x
+					{
+						EEPORM_Data_List[EE_Save_Cnt] = 37; // P형 수신기 이벤트에 주경종 출력 ON 이벤트 추가 및 EEPROM에 저장
+						EE_Save_Cnt++;
+						MAIN_RY_H; // 주경종 출력
+						Accumulation_MAIN_RY = 1;
+					}
+				}
+			}
+			else // 축적 20초 후에 화재 감지시에는 다른 회로에서 화재 감지를 하면 축적하지 않고 바로 화재 이벤트를 추가한다.
+			{
+				if(!TB7_One_Time)
+				{
+					IN_LED7_ON; // 회로 7 LED 출력
+					EEPORM_Data_List[EE_Save_Cnt] = 25; // P형 수신기 이벤트에 회로 7 화재 이벤트 추가 및 EEPROM에 저장
+			  		EE_Save_Cnt++;
+					TB7_One_Time = 1;
+				}
+			}
+		}
+		if(!Accumulation_Key_Value || Accumulation_Fg_7 == 1) // 축적 중이 아닐때나 축적 20초 후에도 화재 감지시
+		{
+			TB7_Fire_Fg = 1;
+			FIRE_CNT = 1;
+			if(circulation_cnt == 0)
+			{
+			  circulation_cnt++;
+			  FIRE_NUM++;
+			}
+			if(TB7_Fire_Fg)
+			{
+			  // 홈화면에서 P형 수신기, 테바테크 글자 지우고 중간에 화재 빨간색 글씨로 출력
+			  memcpy(Tx_Data_List[List_Cnt], P_TYPE_RECIEVER_TEXT_Reset, 11); // P형 수신기 텍스트 초기화
+			  List_Cnt++;
+			  
+			  memcpy(Tx_Data_List[List_Cnt], TEVA_TECH_TEXT_Reset, 11); // 테바테크 텍스트 초기화
+			  List_Cnt++;
+			  
+			  memcpy(Tx_Data_List[List_Cnt], FIRE_TEXT_Send, 17); // 화재 텍스트 출력
+			  List_Cnt++;
+			  
+			  MOD_LED9_ON; // 화재 경보등2 LED 출력
+			  EEPORM_Data_List[EE_Save_Cnt] = 25; // P형 수신기 이벤트에 회로 7 화재 이벤트 추가 및 EEPROM에 저장
+			  EE_Save_Cnt++;
+			  IN_LED7_ON; // 회로 7 LED 출력
+			  if(MAIN_RY == 0) // 이미 주경종 출력 중이면 더이상 출력 x
+			  {
+				if(Main_bell_Key_Value == 1) // 주경종 SW ON상태일때인데 회로 화재라면
+				{
+				  Main_bell_Key_Value = 0;
+				  Main_bell_TOG = 0;
+				  SW_LED4_OFF;
+				}
+				// 화재시 유도등 LED OFF후 유도등 출력
+				SW_LED2_OFF;
+				Guide_light_Key_Value = 0;
+				Guide_light_TOG = 0;
+				
+				// 화재시 이보 LED OFF후 이보 출력
+				SW_LED1_OFF;
+				Fire_report_Key_Value = 0;
+				Fire_report_TOG = 0;
+				
+				MAIN_RY = 1; // MAIN_RY가 1이면 주경종 출력 중
+				if(!Accumulation_Fg_7)
+				{					
+					EEPORM_Data_List[EE_Save_Cnt] = 37; // P형 수신기 이벤트에 주경종 출력 ON 이벤트 추가 및 EEPROM에 저장
+					EE_Save_Cnt++;
+					MAIN_RY_H; // 주경종 출력
+				}
+				if(Earth_alarm_bell_Key_Value != 1) // 지구경종 SW OFF 일때만 지구경종 출력 및 이벤트 추가
+				{
+					EEPORM_Data_List[EE_Save_Cnt] = 35; // P형 수신기 이벤트에 지구경종 출력 ON 이벤트 추가 및 EEPROM에 저장
+					EE_Save_Cnt++;
+					LOCAL_RY_H; // 지구경종 출력
+				}
+				EEPORM_Data_List[EE_Save_Cnt] = 9; // P형 수신기 이벤트에 유도등 출력 ON 이벤트 추가 및 EEPROM에 저장
+				EE_Save_Cnt++;
+				GUID_RY_H; // 유도등 출력
+				EEPORM_Data_List[EE_Save_Cnt] = 33; // P형 수신기 이벤트에 이보 출력 ON 이벤트 추가 및 EEPROM에 저장
+				EE_Save_Cnt++;
+				FIRE_RY_H; // 이보 출력
+			  }
+			  /** 화재 시 회로 단선이면 다시 한번 단선 회로 이벤트 발생 **/
+			  if(TB_IN_AD7 >= 2.9) // 7회로 단선
+			  {
+				EEPORM_Data_List[EE_Save_Cnt] = 67; // P형 수신기 이벤트에 회로7 단선 이벤트 추가 및 EEPROM에 저장
+				EE_Save_Cnt++;
+			  }
+			}
+			if(Accumulation_Fg_7)
+			{
+				Accumulation_Cnt++; // 축적 후 화재 감지 변수 다른 회로에서 화재를 감지하면 축적하지 않음
+				Accumulation_Fg_7 = 0;
+			}
+		}
+	  }
+	}
+	
+	if(TB_IN_AD8 <= 1.0 && TB8_Fire_Fg == 0) // 회로8 화재
+	{
+	  if(++TB8_Fire_Cnt >= 1000) // 1초간 회로8 화재 신호가 들어오면 실행 
+	  {
+		TB8_Fire_Cnt = 0;
+		if(Accumulation_Key_Value == 1) // 축적 버튼이 눌렸다면 20초 타이머 설정 및 해당 회로 축적 중, 주경종 출력 ON 이벤트 추가
+		{
+			if(!Accumulation_Cnt) 
+			{
+				if(!TB8_Accumulation && !Accumulation_Fg_8)
+				{
+					TB8_Accumulation = 1; // 회로 축적중 , 주경종 출력 ON 이벤트 추가 한번만
+					IN_LED8_ON; // 회로 8 LED 출력
+					EEPORM_Data_List[EE_Save_Cnt] = 54; // P형 수신기 이벤트에 해당 회로 축적 중 이벤트 추가 및 EEPROM에 저장
+					EE_Save_Cnt++;
+					if(Accumulation_MAIN_RY == 0) // 이미 주경종 출력 중이면 더이상 출력 x
+					{
+						EEPORM_Data_List[EE_Save_Cnt] = 37; // P형 수신기 이벤트에 주경종 출력 ON 이벤트 추가 및 EEPROM에 저장
+						EE_Save_Cnt++;
+						MAIN_RY_H; // 주경종 출력
+						Accumulation_MAIN_RY = 1;
+					}
+				}
+			}
+			else // 축적 20초 후에 화재 감지시에는 다른 회로에서 화재 감지를 하면 축적하지 않고 바로 화재 이벤트를 추가한다.
+			{
+				if(!TB8_One_Time)
+				{
+					IN_LED8_ON; // 회로 8 LED 출력
+					EEPORM_Data_List[EE_Save_Cnt] = 27; // P형 수신기 이벤트에 회로 8 화재 이벤트 추가 및 EEPROM에 저장
+			  		EE_Save_Cnt++;
+					TB8_One_Time = 1;
+				}
+			}
+		}
+		if(!Accumulation_Key_Value || Accumulation_Fg_8 == 1) // 축적 중이 아닐때나 축적 20초 후에도 화재 감지시
+		{
+			TB8_Fire_Fg = 1;
+			FIRE_CNT = 1;
+			if(circulation_cnt == 0)
+			{
+			  circulation_cnt++;
+			  FIRE_NUM++;
+			}
+			if(TB8_Fire_Fg)
+			{
+			  // 홈화면에서 P형 수신기, 테바테크 글자 지우고 중간에 화재 빨간색 글씨로 출력
+			  memcpy(Tx_Data_List[List_Cnt], P_TYPE_RECIEVER_TEXT_Reset, 11); // P형 수신기 텍스트 초기화
+			  List_Cnt++;
+			  
+			  memcpy(Tx_Data_List[List_Cnt], TEVA_TECH_TEXT_Reset, 11); // 테바테크 텍스트 초기화
+			  List_Cnt++;
+			  
+			  memcpy(Tx_Data_List[List_Cnt], FIRE_TEXT_Send, 17); // 화재 텍스트 출력
+			  List_Cnt++;
+			  
+			  MOD_LED8_ON; // 화재 경보등1 LED 출력
+			  MOD_LED9_ON; // 화재 경보등2 LED 출력
+			  EEPORM_Data_List[EE_Save_Cnt] = 27; // P형 수신기 이벤트에 회로 8 화재 이벤트 추가 및 EEPROM에 저장
+			  EE_Save_Cnt++;
+			  IN_LED8_ON; // 회로 8 LED 출력
+			  if(MAIN_RY == 0) // 이미 주경종 출력 중이면 더이상 출력 x
+			  { 
+				if(Main_bell_Key_Value == 1) // 주경종 SW ON상태일때인데 회로 화재라면
+				{
+				  Main_bell_Key_Value = 0;
+				  Main_bell_TOG = 0;
+				  SW_LED4_OFF;
+				}
+				// 화재시 유도등 LED OFF후 유도등 출력
+				SW_LED2_OFF;
+				Guide_light_Key_Value = 0;
+				Guide_light_TOG = 0;
+				
+				// 화재시 이보 LED OFF후 이보 출력
+				SW_LED1_OFF;
+				Fire_report_Key_Value = 0;
+				Fire_report_TOG = 0;
+				
+				MAIN_RY = 1; // MAIN_RY가 1이면 주경종 출력 중
+				if(!Accumulation_Fg_8)
+				{					
+					EEPORM_Data_List[EE_Save_Cnt] = 37; // P형 수신기 이벤트에 주경종 출력 ON 이벤트 추가 및 EEPROM에 저장
+					EE_Save_Cnt++;
+					MAIN_RY_H; // 주경종 출력
+				}
+				if(Earth_alarm_bell_Key_Value != 1) // 지구경종 SW OFF 일때만 지구경종 출력 및 이벤트 추가
+				{
+					EEPORM_Data_List[EE_Save_Cnt] = 35; // P형 수신기 이벤트에 지구경종 출력 ON 이벤트 추가 및 EEPROM에 저장
+					EE_Save_Cnt++;
+					LOCAL_RY_H; // 지구경종 출력
+				}
+				EEPORM_Data_List[EE_Save_Cnt] = 9; // P형 수신기 이벤트에 유도등 출력 ON 이벤트 추가 및 EEPROM에 저장
+				EE_Save_Cnt++;
+				GUID_RY_H; // 유도등 출력
+				EEPORM_Data_List[EE_Save_Cnt] = 33; // P형 수신기 이벤트에 이보 출력 ON 이벤트 추가 및 EEPROM에 저장
+				EE_Save_Cnt++;
+				FIRE_RY_H; // 이보 출력
+			  }
+			  /** 화재 시 회로 단선이면 다시 한번 단선 회로 이벤트 발생 **/
+			  if(TB_IN_AD8 >= 2.9) // 8회로 단선
+			  {
+				EEPORM_Data_List[EE_Save_Cnt] = 68; // P형 수신기 이벤트에 회로8 단선 이벤트 추가 및 EEPROM에 저장
+				EE_Save_Cnt++;
+			  }
+			}
+			if(Accumulation_Fg_8)
+			{
+				Accumulation_Cnt++; // 축적 후 화재 감지 변수 다른 회로에서 화재를 감지하면 축적하지 않음
+				Accumulation_Fg_8 = 0;
+			}
+		}
+	  }
+	}
+	
+	if(TB_IN_AD9 <= 1.0 && TB9_Fire_Fg == 0) // 회로9 화재
+	{
+	  if(++TB9_Fire_Cnt >= 1000) // 1초간 회로9 화재 신호가 들어오면 실행 
+	  {
+		TB9_Fire_Cnt = 0;
+		if(Accumulation_Key_Value == 1) // 축적 버튼이 눌렸다면 20초 타이머 설정 및 해당 회로 축적 중, 주경종 출력 ON 이벤트 추가
+		{
+			if(!Accumulation_Cnt) 
+			{
+				if(!TB9_Accumulation && !Accumulation_Fg_9)
+				{
+					TB9_Accumulation = 1; // 회로 축적중 , 주경종 출력 ON 이벤트 추가 한번만
+					IN_LED9_ON; // 회로 9 LED 출력
+					EEPORM_Data_List[EE_Save_Cnt] = 55; // P형 수신기 이벤트에 해당 회로 축적 중 이벤트 추가 및 EEPROM에 저장
+					EE_Save_Cnt++;
+					if(Accumulation_MAIN_RY == 0) // 이미 주경종 출력 중이면 더이상 출력 x
+					{
+						EEPORM_Data_List[EE_Save_Cnt] = 37; // P형 수신기 이벤트에 주경종 출력 ON 이벤트 추가 및 EEPROM에 저장
+						EE_Save_Cnt++;
+						MAIN_RY_H; // 주경종 출력
+						Accumulation_MAIN_RY = 1;
+					}
+				}
+			}
+			else // 축적 20초 후에 화재 감지시에는 다른 회로에서 화재 감지를 하면 축적하지 않고 바로 화재 이벤트를 추가한다.
+			{
+				if(!TB9_One_Time)
+				{
+					IN_LED9_ON; // 회로 9 LED 출력
+					EEPORM_Data_List[EE_Save_Cnt] = 29; // P형 수신기 이벤트에 회로 9 화재 이벤트 추가 및 EEPROM에 저장
+			  		EE_Save_Cnt++;
+					TB9_One_Time = 1;
+				}
+			}
+		}
+		if(!Accumulation_Key_Value || Accumulation_Fg_9 == 1) // 축적 중이 아닐때나 축적 20초 후에도 화재 감지시
+		{
+			TB9_Fire_Fg = 1;
+			FIRE_CNT = 1;
+			if(circulation_cnt == 0)
+			{
+			  circulation_cnt++;
+			  FIRE_NUM++;
+			}
+			if(TB9_Fire_Fg)
+			{
+			  // 홈화면에서 P형 수신기, 테바테크 글자 지우고 중간에 화재 빨간색 글씨로 출력
+			  memcpy(Tx_Data_List[List_Cnt], P_TYPE_RECIEVER_TEXT_Reset, 11); // P형 수신기 텍스트 초기화
+			  List_Cnt++;
+			  
+			  memcpy(Tx_Data_List[List_Cnt], TEVA_TECH_TEXT_Reset, 11); // 테바테크 텍스트 초기화
+			  List_Cnt++;
+			  
+			  memcpy(Tx_Data_List[List_Cnt], FIRE_TEXT_Send, 17); // 화재 텍스트 출력
+			  List_Cnt++;
+			  
+			  MOD_LED8_ON; // 화재 경보등1 LED 출력
+			  MOD_LED9_ON; // 화재 경보등2 LED 출력
+			  EEPORM_Data_List[EE_Save_Cnt] = 29; // P형 수신기 이벤트에 회로 9 화재 이벤트 추가 및 EEPROM에 저장
+			  EE_Save_Cnt++;
+			  IN_LED9_ON; // 회로 9 LED 출력
+			  if(MAIN_RY == 0) // 이미 주경종 출력 중이면 더이상 출력 x
+			  {
+				if(Main_bell_Key_Value == 1) // 주경종 SW ON상태일때인데 회로 화재라면
+				{
+				  Main_bell_Key_Value = 0;
+				  Main_bell_TOG = 0;
+				  SW_LED4_OFF;
+				}
+				// 화재시 유도등 LED OFF후 유도등 출력
+				SW_LED2_OFF;
+				Guide_light_Key_Value = 0;
+				Guide_light_TOG = 0;
+				
+				// 화재시 이보 LED OFF후 이보 출력
+				SW_LED1_OFF;
+				Fire_report_Key_Value = 0;
+				Fire_report_TOG = 0;
+				
+				MAIN_RY = 1; // MAIN_RY가 1이면 주경종 출력 중
+				if(!Accumulation_Fg_9)
+				{					
+					EEPORM_Data_List[EE_Save_Cnt] = 37; // P형 수신기 이벤트에 주경종 출력 ON 이벤트 추가 및 EEPROM에 저장
+					EE_Save_Cnt++;
+					MAIN_RY_H; // 주경종 출력
+				}
+				if(Earth_alarm_bell_Key_Value != 1) // 지구경종 SW OFF 일때만 지구경종 출력 및 이벤트 추가
+				{
+					EEPORM_Data_List[EE_Save_Cnt] = 35; // P형 수신기 이벤트에 지구경종 출력 ON 이벤트 추가 및 EEPROM에 저장
+					EE_Save_Cnt++;
+					LOCAL_RY_H; // 지구경종 출력
+				}
+				EEPORM_Data_List[EE_Save_Cnt] = 9; // P형 수신기 이벤트에 유도등 출력 ON 이벤트 추가 및 EEPROM에 저장
+				EE_Save_Cnt++;
+				GUID_RY_H; // 유도등 출력
+				EEPORM_Data_List[EE_Save_Cnt] = 33; // P형 수신기 이벤트에 이보 출력 ON 이벤트 추가 및 EEPROM에 저장
+				EE_Save_Cnt++;
+				FIRE_RY_H; // 이보 출력
+			  }
+			  /** 화재 시 회로 단선이면 다시 한번 단선 회로 이벤트 발생 **/
+			  if(TB_IN_AD9 >= 2.9) // 9회로 단선
+			  {
+				EEPORM_Data_List[EE_Save_Cnt] = 69; // P형 수신기 이벤트에 회로9 단선 이벤트 추가 및 EEPROM에 저장
+				EE_Save_Cnt++;
+			  }
+			}
+			if(Accumulation_Fg_9)
+			{
+				Accumulation_Cnt++; // 축적 후 화재 감지 변수 다른 회로에서 화재를 감지하면 축적하지 않음
+				Accumulation_Fg_9 = 0;
+			}
+	  	}
+	  }
+	}
+	
+	if(TB_IN_AD10 <= 1.0 && TB10_Fire_Fg == 0) // 회로10 화재
+	{
+	  if(++TB10_Fire_Cnt >= 1000) // 1초간 회로10 화재 신호가 들어오면 실행 
+	  {
+		TB10_Fire_Cnt = 0;
+		if(Accumulation_Key_Value == 1) // 축적 버튼이 눌렸다면 20초 타이머 설정 및 해당 회로 축적 중, 주경종 출력 ON 이벤트 추가
+		{
+			if(!Accumulation_Cnt) 
+			{
+				if(!TB10_Accumulation && !Accumulation_Fg_10)
+				{
+					TB10_Accumulation = 1; // 회로 축적중 , 주경종 출력 ON 이벤트 추가 한번만
+					IN_LED10_ON; // 회로 10 LED 출력
+					EEPORM_Data_List[EE_Save_Cnt] = 56; // P형 수신기 이벤트에 해당 회로 축적 중 이벤트 추가 및 EEPROM에 저장
+					EE_Save_Cnt++;
+					if(Accumulation_MAIN_RY == 0) // 이미 주경종 출력 중이면 더이상 출력 x
+					{
+						EEPORM_Data_List[EE_Save_Cnt] = 37; // P형 수신기 이벤트에 주경종 출력 ON 이벤트 추가 및 EEPROM에 저장
+						EE_Save_Cnt++;
+						MAIN_RY_H; // 주경종 출력
+						Accumulation_MAIN_RY = 1;
+					}
+				}
+			}
+			else // 축적 20초 후에 화재 감지시에는 다른 회로에서 화재 감지를 하면 축적하지 않고 바로 화재 이벤트를 추가한다.
+			{
+				if(!TB10_One_Time)
+				{
+					IN_LED10_ON; // 회로 10 LED 출력
+					EEPORM_Data_List[EE_Save_Cnt] = 31; // P형 수신기 이벤트에 회로 10 화재 이벤트 추가 및 EEPROM에 저장
+			  		EE_Save_Cnt++;
+					TB10_One_Time = 1;
+				}
+			}
+		}
+		if(!Accumulation_Key_Value || Accumulation_Fg_10 == 1) // 축적 중이 아닐때나 축적 20초 후에도 화재 감지시
+		{
+			TB10_Fire_Fg = 1;
+			FIRE_CNT = 1;
+			if(circulation_cnt == 0)
+			{
+			  circulation_cnt++;
+			  FIRE_NUM++;
+			}
+			if(TB10_Fire_Fg)
+			{
+			  // 홈화면에서 P형 수신기, 테바테크 글자 지우고 중간에 화재 빨간색 글씨로 출력
+			  memcpy(Tx_Data_List[List_Cnt], P_TYPE_RECIEVER_TEXT_Reset, 11); // P형 수신기 텍스트 초기화
+			  List_Cnt++;
+			  
+			  memcpy(Tx_Data_List[List_Cnt], TEVA_TECH_TEXT_Reset, 11); // 테바테크 텍스트 초기화
+			  List_Cnt++;
+			  
+			  memcpy(Tx_Data_List[List_Cnt], FIRE_TEXT_Send, 17); // 화재 텍스트 출력
+			  List_Cnt++;
+			  
+			  MOD_LED8_ON; // 화재 경보등1 LED 출력
+			  MOD_LED9_ON; // 화재 경보등2 LED 출력
+			  EEPORM_Data_List[EE_Save_Cnt] = 31; // P형 수신기 이벤트에 회로 10 화재 이벤트 추가 및 EEPROM에 저장
+			  EE_Save_Cnt++;
+			  IN_LED10_ON; // 회로 10 LED 출력
+			  if(MAIN_RY == 0) // 이미 주경종 출력 중이면 더이상 출력 x
+			  {
+				if(Main_bell_Key_Value == 1) // 주경종 SW ON상태일때인데 회로 화재라면
+				{
+				  Main_bell_Key_Value = 0;
+				  Main_bell_TOG = 0;
+				  SW_LED4_OFF;
+				}
+				// 화재시 유도등 LED OFF후 유도등 출력
+				SW_LED2_OFF;
+				Guide_light_Key_Value = 0;
+				Guide_light_TOG = 0;
+				
+				// 화재시 이보 LED OFF후 이보 출력
+				SW_LED1_OFF;
+				Fire_report_Key_Value = 0;
+				Fire_report_TOG = 0;
+				
+				MAIN_RY = 1; // MAIN_RY가 1이면 주경종 출력 중
+				if(!Accumulation_Fg_10)
+				{					
+					EEPORM_Data_List[EE_Save_Cnt] = 37; // P형 수신기 이벤트에 주경종 출력 ON 이벤트 추가 및 EEPROM에 저장
+					EE_Save_Cnt++;
+					MAIN_RY_H; // 주경종 출력
+				}
+				if(Earth_alarm_bell_Key_Value != 1) // 지구경종 SW OFF 일때만 지구경종 출력 및 이벤트 추가
+				{
+					EEPORM_Data_List[EE_Save_Cnt] = 35; // P형 수신기 이벤트에 지구경종 출력 ON 이벤트 추가 및 EEPROM에 저장
+					EE_Save_Cnt++;
+					LOCAL_RY_H; // 지구경종 출력
+				}
+				EEPORM_Data_List[EE_Save_Cnt] = 9; // P형 수신기 이벤트에 유도등 출력 ON 이벤트 추가 및 EEPROM에 저장
+				EE_Save_Cnt++;
+				GUID_RY_H; // 유도등 출력
+				EEPORM_Data_List[EE_Save_Cnt] = 33; // P형 수신기 이벤트에 이보 출력 ON 이벤트 추가 및 EEPROM에 저장
+				EE_Save_Cnt++;
+				FIRE_RY_H; // 이보 출력
+			  }
+			  /** 화재 시 회로 단선이면 다시 한번 단선 회로 이벤트 발생 **/
+			  if(TB_IN_AD10 >= 2.9) // 10회로 단선
+			  {
+				EEPORM_Data_List[EE_Save_Cnt] = 70; // P형 수신기 이벤트에 회로10 단선 이벤트 추가 및 EEPROM에 저장
+				EE_Save_Cnt++;
+			  }
+			}
+			if(Accumulation_Fg_10)
+			{
+				Accumulation_Cnt++; // 축적 후 화재 감지 변수 다른 회로에서 화재를 감지하면 축적하지 않음
+				Accumulation_Fg_10 = 0;
+			}
+		}
+	  }
+	}
+	
+	if(TB_SEND_AD <= 1.0 && TB_SEND_Fire_Fg == 0) // 발생기 누르면 회로 화재
+	{
+	  if(++TB_SEND_Fire_Cnt >= 1000) // 1초간 발생기 신호가 들어오면 실행 
+	  {
+		TB_SEND_Fire_Cnt = 0;
+		TB_SEND_Fire_Fg = 1;
+		FIRE_CNT = 1;
+		GENERATOR = 1; // 발생기 켜짐
+		if(circulation_cnt == 0)
+		{
+		  circulation_cnt++;
+		  FIRE_NUM++;
+		}
+		if(TB_SEND_Fire_Fg)
+		{
+		  // 홈화면에서 P형 수신기, 테바테크 글자 지우고 중간에 화재 빨간색 글씨로 출력
+		  memcpy(Tx_Data_List[List_Cnt], P_TYPE_RECIEVER_TEXT_Reset, 11); // P형 수신기 텍스트 초기화
+		  List_Cnt++;
+		  
+		  memcpy(Tx_Data_List[List_Cnt], TEVA_TECH_TEXT_Reset, 11); // 테바테크 텍스트 초기화
+		  List_Cnt++;
+		  
+		  memcpy(Tx_Data_List[List_Cnt], FIRE_TEXT_Send, 17); // 화재 텍스트 출력
+		  List_Cnt++;
+		  
+		  MOD_LED8_ON; // 화재 경보등1 LED 출력
+		  MOD_LED9_ON; // 화재 경보등2 LED 출력
+		  EEPORM_Data_List[EE_Save_Cnt] = 57; // P형 수신기 이벤트에 발신기 ON 이벤트 추가 및 EEPROM에 저장
+		  EE_Save_Cnt++;
+		  if(MAIN_RY == 0) // 이미 주경종 출력 중이면 더이상 출력 x
+		  {
+			if(Main_bell_Key_Value == 1) // 주경종 SW ON상태일때인데 회로 화재라면
+			{
+			  Main_bell_Key_Value = 0;
+			  Main_bell_TOG = 0;
+			  SW_LED4_OFF;
+			}
+			// 화재시 유도등 LED OFF후 유도등 출력
+			SW_LED2_OFF;
+		    Guide_light_Key_Value = 0;
+		    Guide_light_TOG = 0;
+			
+			// 화재시 이보 LED OFF후 이보 출력
+			SW_LED1_OFF;
+		    Fire_report_Key_Value = 0;
+		    Fire_report_TOG = 0;
+			
+			MAIN_RY = 1; // MAIN_RY가 1이면 주경종 출력 중
+			EEPORM_Data_List[EE_Save_Cnt] = 37; // P형 수신기 이벤트에 주경종 출력 ON 이벤트 추가 및 EEPROM에 저장
+			EE_Save_Cnt++;
+			MAIN_RY_H; // 주경종 출력
+			if(Earth_alarm_bell_Key_Value != 1) // 지구경종 SW OFF 일때만 지구경종 출력 및 이벤트 추가
+			{
+				EEPORM_Data_List[EE_Save_Cnt] = 35; // P형 수신기 이벤트에 지구경종 출력 ON 이벤트 추가 및 EEPROM에 저장
+				EE_Save_Cnt++;
+				LOCAL_RY_H; // 지구경종 출력
+			}
+			EEPORM_Data_List[EE_Save_Cnt] = 9; // P형 수신기 이벤트에 유도등 출력 ON 이벤트 추가 및 EEPROM에 저장
+			EE_Save_Cnt++;
+			GUID_RY_H; // 유도등 출력
+			EEPORM_Data_List[EE_Save_Cnt] = 33; // P형 수신기 이벤트에 이보 출력 ON 이벤트 추가 및 EEPROM에 저장
+			EE_Save_Cnt++;
+			FIRE_RY_H; // 이보 출력
+		  }
+		  /** 화재 시 회로 단선이면 다시 한번 단선 회로 이벤트 발생 **/
+		  if(TB_IN_AD1 >= 2.9) // 1회로 단선
+		  {
+			EEPORM_Data_List[EE_Save_Cnt] = 61; // P형 수신기 이벤트에 회로1 단선 이벤트 추가 및 EEPROM에 저장
+			EE_Save_Cnt++;
+		  }
+			
+		  if(TB_IN_AD2 >= 2.9) // 2회로 단선
+		  {
+			EEPORM_Data_List[EE_Save_Cnt] = 62; // P형 수신기 이벤트에 회로2 단선 이벤트 추가 및 EEPROM에 저장
+			EE_Save_Cnt++;
+		  }
+			
+		  if(TB_IN_AD3 >= 2.9) // 3회로 단선
+		  {
+			EEPORM_Data_List[EE_Save_Cnt] = 63; // P형 수신기 이벤트에 회로3 단선 이벤트 추가 및 EEPROM에 저장
+			EE_Save_Cnt++;
+		  }
+			
+		  if(TB_IN_AD4 >= 2.9) // 4회로 단선
+		  {
+			EEPORM_Data_List[EE_Save_Cnt] = 64; // P형 수신기 이벤트에 회로4 단선 이벤트 추가 및 EEPROM에 저장
+			EE_Save_Cnt++;
+		  }
+			
+		  if(TB_IN_AD5 >= 2.9) // 5회로 단선
+		  {
+			EEPORM_Data_List[EE_Save_Cnt] = 65; // P형 수신기 이벤트에 회로5 단선 이벤트 추가 및 EEPROM에 저장
+			EE_Save_Cnt++;
+		  }
+			
+		  /*if(TB_IN_AD6 >= 2.9) // 6회로 단선
+		  {
+			EEPORM_Data_List[EE_Save_Cnt] = 66; // P형 수신기 이벤트에 회로6 단선 이벤트 추가 및 EEPROM에 저장
+			EE_Save_Cnt++;
+		  }
+			
+		  if(TB_IN_AD7 >= 2.9) // 7회로 단선
+		  {
+			EEPORM_Data_List[EE_Save_Cnt] = 67; // P형 수신기 이벤트에 회로7 단선 이벤트 추가 및 EEPROM에 저장
+			EE_Save_Cnt++;
+		  }
+			
+		  if(TB_IN_AD8 >= 2.9) // 8회로 단선
+		  {
+			EEPORM_Data_List[EE_Save_Cnt] = 68; // P형 수신기 이벤트에 회로8 단선 이벤트 추가 및 EEPROM에 저장
+			EE_Save_Cnt++;
+		  }
+			
+		  if(TB_IN_AD9 >= 2.9) // 9회로 단선
+		  {
+			EEPORM_Data_List[EE_Save_Cnt] = 69; // P형 수신기 이벤트에 회로9 단선 이벤트 추가 및 EEPROM에 저장
+			EE_Save_Cnt++;
+		  }
+			
+		  if(TB_IN_AD10 >= 2.9) // 10회로 단선
+		  {
+			EEPORM_Data_List[EE_Save_Cnt] = 70; // P형 수신기 이벤트에 회로10 단선 이벤트 추가 및 EEPROM에 저장
+			EE_Save_Cnt++;
+		  }*/
+		}
+	  }
+	}
+	else if(GENERATOR == 1 && TB_SEND_AD >= 2.0) // 발생기가 눌렸다가 떼지면 복구 SW ON
+	{
+	  GENERATOR = 0;
+	  // 홈화면에서 P형 수신기, 테바테크 글자 출력하고 중간에 화재 빨간색 글씨 초기화
+	  memcpy(Tx_Data_List[List_Cnt], P_TYPE_RECIEVER_TEXT_Send, 25); // P형 수신기 텍스트 출력
+	  List_Cnt++;
+
+	  memcpy(Tx_Data_List[List_Cnt], TEVA_TECH_TEXT_Send, 23); // 테바테크 텍스트 출력
+	  List_Cnt++;
+
+	  memcpy(Tx_Data_List[List_Cnt], FIRE_TEXT_Reset, 11); // 화재 텍스트 초기화
+	  List_Cnt++;
+	  EEPORM_Data_List[EE_Save_Cnt] = 58; // P형 수신기 이벤트에 발신기 OFF 이벤트 추가 및 EEPROM에 저장
+	  EE_Save_Cnt++;
+	  EEPORM_Data_List[EE_Save_Cnt] = 38; // P형 수신기 이벤트에 복구 SW ON 이벤트 저장 및 EEPROM에 저장
+	  EE_Save_Cnt++;
+	  FIRE_NUM = 0;
+	  MAIN_RY = 0;
+	  
+	  if(FIRE_CNT) // 화재가 났을경우에만 복구 SW 누르면 주경종,지구경종,유도등,이보 출력 OFF 신호를 보내고 저장함.
+	  {
+		FIRE_CNT = 0;
+		EEPORM_Data_List[EE_Save_Cnt] = 36; // P형 수신기 이벤트에 주경종 출력 OFF 이벤트 추가 및 EEPROM에 저장
+		EE_Save_Cnt++;
+		if(Earth_alarm_bell_Key_Value != 1) // 지구경종 SW OFF 일때만 P형 수신기 이벤트에 지구경종 출력 OFF 이벤트 추가 및 EEPROM에 저장
+		{
+			EEPORM_Data_List[EE_Save_Cnt] = 34; // P형 수신기 이벤트에 지구경종 출력 OFF 이벤트 추가 및 EEPROM에 저장
+			EE_Save_Cnt++;
+			LOCAL_RY_H; // 지구경종 출력
+		}
+		EEPORM_Data_List[EE_Save_Cnt] = 8; // P형 수신기 이벤트에 유도등 출력 OFF 이벤트 추가 및 EEPROM에 저장
+		EE_Save_Cnt++;
+		EEPORM_Data_List[EE_Save_Cnt] = 32; // P형 수신기 이벤트에 이보 출력 OFF 이벤트 추가 및 EEPROM에 저장
+		EE_Save_Cnt++;
+		MAIN_RY_L; // 주경종 OFF
+		LOCAL_RY_L; // 지구경종 OFF
+		GUID_RY_L; // 유도등 OFF
+		FIRE_RY_L; // 이보 OFF
+		MOD_LED8_OFF; // 화재 경보등1 LED OFF
+		MOD_LED9_OFF; // 화재 경보등2 LED OFF
+		IN_LED1_OFF; // 회로 1 LED OFF
+		IN_LED2_OFF; // 회로 2 LED OFF
+		IN_LED3_OFF; // 회로 3 LED OFF
+		IN_LED4_OFF; // 회로 4 LED OFF
+		IN_LED5_OFF; // 회로 5 LED OFF
+		IN_LED6_OFF; // 회로 6 LED OFF
+		IN_LED7_OFF; // 회로 7 LED OFF
+		IN_LED8_OFF; // 회로 8 LED OFF
+		IN_LED9_OFF; // 회로 9 LED OFF
+		IN_LED10_OFF; // 회로 10 LED OFF
+		
+		/** 화재 시 회로 단선이면 다시 한번 단선 회로 이벤트 발생 **/
+		if(TB_IN_AD1 >= 2.9) // 1회로 단선
+		{
+		  EEPORM_Data_List[EE_Save_Cnt] = 61; // P형 수신기 이벤트에 회로1 단선 이벤트 추가 및 EEPROM에 저장
+		  EE_Save_Cnt++;
+		}
+			
+		if(TB_IN_AD2 >= 2.9) // 2회로 단선
+		{
+		  EEPORM_Data_List[EE_Save_Cnt] = 62; // P형 수신기 이벤트에 회로2 단선 이벤트 추가 및 EEPROM에 저장
+		  EE_Save_Cnt++;
+		}
+			
+		if(TB_IN_AD3 >= 2.9) // 3회로 단선
+		{
+		  EEPORM_Data_List[EE_Save_Cnt] = 63; // P형 수신기 이벤트에 회로3 단선 이벤트 추가 및 EEPROM에 저장
+		  EE_Save_Cnt++;
+		}
+			
+		if(TB_IN_AD4 >= 2.9) // 4회로 단선
+		{
+		  EEPORM_Data_List[EE_Save_Cnt] = 64; // P형 수신기 이벤트에 회로4 단선 이벤트 추가 및 EEPROM에 저장
+		  EE_Save_Cnt++;
+		}
+			
+		if(TB_IN_AD5 >= 2.9) // 5회로 단선
+		{
+		  EEPORM_Data_List[EE_Save_Cnt] = 65; // P형 수신기 이벤트에 회로5 단선 이벤트 추가 및 EEPROM에 저장
+		  EE_Save_Cnt++;
+		}
+			
+		/*if(TB_IN_AD6 >= 2.9) // 6회로 단선
+	    {
+	  	  EEPORM_Data_List[EE_Save_Cnt] = 66; // P형 수신기 이벤트에 회로6 단선 이벤트 추가 및 EEPROM에 저장
+		  EE_Save_Cnt++;
+		}
+			
+		if(TB_IN_AD7 >= 2.9) // 7회로 단선
+		{
+		  EEPORM_Data_List[EE_Save_Cnt] = 67; // P형 수신기 이벤트에 회로7 단선 이벤트 추가 및 EEPROM에 저장
+		  EE_Save_Cnt++;
+		}
+			
+		if(TB_IN_AD8 >= 2.9) // 8회로 단선
+		{
+		  EEPORM_Data_List[EE_Save_Cnt] = 68; // P형 수신기 이벤트에 회로8 단선 이벤트 추가 및 EEPROM에 저장
+		  EE_Save_Cnt++;
+		}
+			
+		if(TB_IN_AD9 >= 2.9) // 9회로 단선
+		{
+		  EEPORM_Data_List[EE_Save_Cnt] = 69; // P형 수신기 이벤트에 회로9 단선 이벤트 추가 및 EEPROM에 저장
+		  EE_Save_Cnt++;
+		}
+			
+		if(TB_IN_AD10 >= 2.9) // 10회로 단선
+		{
+		  EEPORM_Data_List[EE_Save_Cnt] = 70; // P형 수신기 이벤트에 회로10 단선 이벤트 추가 및 EEPROM에 저장
+		  EE_Save_Cnt++;
+		}*/
+	  }
+	  
+	  Main_bell_Key_Value = 0;
+	  Main_bell_TOG = 0;
+	  SW_LED4_OFF;
+	  
+	  SW_LED3_OFF;
+	  Earth_alarm_bell_Key_Value = 0;
+	  Earth_alarm_bell_TOG = 0;
+	  
+	  EN_H_L_24V_FG = 1;
+	  if(EN_H_L_24V_FG == 1)
+	  {
+		EN_H_L_24V_FG = 0;
+		TB_IN_AD_FG = 0;
+		EN_L_24V;
+		EN_H_L_24V_CNT = 10000; // 1초 뒤에 다시 EN_H_24V
+	  }
+	}
+	
+	// BAT전압에 따른 LED 상태 변화
+	if(BAT_AD <= 20.0 && (BAT_LED == 0 || BAT_LED == 2 || BAT_LED == 3)) // BAT 전압이 20V 이하일때
+	{
+	  MOD_LED3_ON;
+	  MOD_LED2_OFF;
+	  MOD_LED1_OFF;
+	  BAT_LED = 1;
+	}
+	else if(BAT_AD > 20.2 && BAT_AD < 26.0 && (BAT_LED == 0 || BAT_LED == 1 || BAT_LED == 3)) // BAT 전압이 20V보다 크고 26V 보다 작을때
+	{
+	  MOD_LED3_OFF;
+	  MOD_LED2_ON;
+	  MOD_LED1_OFF;
+	  BAT_LED = 2;
+	}
+	else if(BAT_AD >= 26.2 && (BAT_LED == 0 || BAT_LED == 1 || BAT_LED == 2)) // BAT 전압이 26V 이상일때
+	{
+	  MOD_LED3_OFF;
+	  MOD_LED2_OFF;
+	  MOD_LED1_ON;
+	  BAT_LED = 3;
+	}
+	
+	// 교류전원 ON시 Green_LED ON 예비전원 Red_LED OFF
+	if(CHK_26V >= 25.0)
+	{
+	  MOD_LED7_ON;
+	  MOD_LED6_OFF;
+	}
+	else // 교류전원 OFF시 Green_LED OFF 예비전원 Red_LED ON
+	{
+	  MOD_LED7_OFF;
+	  MOD_LED6_ON;
+	}
+	
+	if(circulation_cnt == 1)
+	{
+	  circulation_cnt = 0;
+	}
+	
+	if(FIRE_NUM >= 2 && Main_bell_Key_Value == 1) // 회로 화재시 주경종 출력 OFF 상태인데 다른 회로 화재시 다른 회로 화재, 주경종 출력 ON 이벤트 추가, 주경종 출력
+	{
+	  FIRE_NUM = 1;
+	  MAIN_RY_H; // 주경종 출력
+	  EEPORM_Data_List[EE_Save_Cnt] = 37; // P형 수신기 이벤트에 주경종 출력 ON 이벤트 추가 및 EEPROM에 저장
+	  EE_Save_Cnt++;
+	  if(Main_bell_Key_Value == 1) // 주경종 SW ON상태일때인데 회로 화재라면
+	  {
+		Main_bell_Key_Value = 0;
+		Main_bell_TOG = 0;
+		SW_LED4_OFF;
+	  }
+	}
+	
+	if(TB_IN_AD1 >= 2.9) // 1회로 단선
+	{
+		if(!Event_Buzzer_One_Time_AD1) // Event_Buzzer_One_Time_AD1 변수를 이용해 이벤트 저장 및 Buzzer_Fg는 한번만 동작하도록 한다.
+		{
+			Event_Buzzer_One_Time_AD1 = 1;
+			EEPORM_Data_List[EE_Save_Cnt] = 61; // P형 수신기 이벤트에 회로1 단선 이벤트 추가 및 EEPROM에 저장
+			EE_Save_Cnt++;
+			Buzzer_Fg = 1; // 회로 단선시 Buzzer_On
+			IN_LED1_TOG_Fg = 1; // 0.5s 마다 회로1 LED를 Toggle
+		}
+	}
+	else
+	{
+		if(Event_Buzzer_One_Time_AD1) // Event_Buzzer_One_Time_AD1 변수를 이용해 이벤트 저장 및 Buzzer_Fg는 한번만 동작하도록 한다.
+		{
+			Event_Buzzer_One_Time_AD1 = 0;
+			EEPORM_Data_List[EE_Save_Cnt] = 12; // P형 수신기 이벤트에 회로1 정상 이벤트 추가 및 EEPROM에 저장
+			EE_Save_Cnt++;
+			Buzzer_Fg = 0; // 회로 연결시 Buzzer_OFF
+			BUZZER_OFF;
+			IN_LED1_TOG_Fg = 0; // 0.5s 마다 회로1 LED를 Toggle X
+			IN_LED1_OFF;
+		}
+	}
+	
+	if(TB_IN_AD2 >= 2.9) // 2회로 단선
+	{
+		if(!Event_Buzzer_One_Time_AD2) // Event_Buzzer_One_Time_AD2 변수를 이용해 이벤트 저장 및 Buzzer_Fg는 한번만 동작하도록 한다.
+		{
+			Event_Buzzer_One_Time_AD2 = 1;
+			EEPORM_Data_List[EE_Save_Cnt] = 62; // P형 수신기 이벤트에 회로2 단선 이벤트 추가 및 EEPROM에 저장
+			EE_Save_Cnt++;
+			Buzzer_Fg = 1; // 회로 단선시 Buzzer_On
+			IN_LED2_TOG_Fg = 1; // 0.5s 마다 회로2 LED를 Toggle
+		}
+	}
+	else
+	{
+		if(Event_Buzzer_One_Time_AD2) // Event_Buzzer_One_Time_AD2 변수를 이용해 이벤트 저장 및 Buzzer_Fg는 한번만 동작하도록 한다.
+		{
+			Event_Buzzer_One_Time_AD2 = 0;
+			EEPORM_Data_List[EE_Save_Cnt] = 14; // P형 수신기 이벤트에 회로2 정상 이벤트 추가 및 EEPROM에 저장
+			EE_Save_Cnt++;
+			Buzzer_Fg = 0; // 회로 연결시 Buzzer_OFF
+			BUZZER_OFF;
+			IN_LED2_TOG_Fg = 0; // 0.5s 마다 회로2 LED를 Toggle X
+			IN_LED2_OFF;
+		}
+	}
+	
+	if(TB_IN_AD3 >= 2.9) // 3회로 단선
+	{
+		if(!Event_Buzzer_One_Time_AD3) // Event_Buzzer_One_Time_AD3 변수를 이용해 이벤트 저장 및 Buzzer_Fg는 한번만 동작하도록 한다.
+		{
+			Event_Buzzer_One_Time_AD3 = 1;
+			EEPORM_Data_List[EE_Save_Cnt] = 63; // P형 수신기 이벤트에 회로3 단선 이벤트 추가 및 EEPROM에 저장
+			EE_Save_Cnt++;
+			Buzzer_Fg = 1; // 회로 단선시 Buzzer_On
+			IN_LED3_TOG_Fg = 1; // 0.5s 마다 회로3 LED를 Toggle
+		}
+	}
+	else
+	{
+		if(Event_Buzzer_One_Time_AD3) // Event_Buzzer_One_Time_AD3 변수를 이용해 이벤트 저장 및 Buzzer_Fg는 한번만 동작하도록 한다.
+		{
+			Event_Buzzer_One_Time_AD3 = 0;
+			EEPORM_Data_List[EE_Save_Cnt] = 16; // P형 수신기 이벤트에 회로3 정상 이벤트 추가 및 EEPROM에 저장
+			EE_Save_Cnt++;
+			Buzzer_Fg = 0; // 회로 연결시 Buzzer_OFF
+			BUZZER_OFF;
+			IN_LED3_TOG_Fg = 0; // 0.5s 마다 회로3 LED를 Toggle X
+			IN_LED3_OFF;
+		}
+	}
+	
+	if(TB_IN_AD4 >= 2.9) // 4회로 단선
+	{
+		if(!Event_Buzzer_One_Time_AD4) // Event_Buzzer_One_Time_AD4 변수를 이용해 이벤트 저장 및 Buzzer_Fg는 한번만 동작하도록 한다.
+		{
+			Event_Buzzer_One_Time_AD4 = 1;
+			EEPORM_Data_List[EE_Save_Cnt] = 64; // P형 수신기 이벤트에 회로4 단선 이벤트 추가 및 EEPROM에 저장
+			EE_Save_Cnt++;
+			Buzzer_Fg = 1; // 회로 단선시 Buzzer_On
+			IN_LED4_TOG_Fg = 1; // 0.5s 마다 회로4 LED를 Toggle
+		}
+	}
+	else
+	{
+		if(Event_Buzzer_One_Time_AD4) // Event_Buzzer_One_Time_AD4 변수를 이용해 이벤트 저장 및 Buzzer_Fg는 한번만 동작하도록 한다.
+		{
+			Event_Buzzer_One_Time_AD4 = 0;
+			EEPORM_Data_List[EE_Save_Cnt] = 18; // P형 수신기 이벤트에 회로4 정상 이벤트 추가 및 EEPROM에 저장
+			EE_Save_Cnt++;
+			Buzzer_Fg = 0; // 회로 연결시 Buzzer_OFF
+			BUZZER_OFF;
+			IN_LED4_TOG_Fg = 0; // 0.5s 마다 회로4 LED를 Toggle X
+			IN_LED4_OFF;
+		}
+	}
+	
+	if(TB_IN_AD5 >= 2.9) // 5회로 단선
+	{
+		if(!Event_Buzzer_One_Time_AD5) // Event_Buzzer_One_Time_AD5 변수를 이용해 이벤트 저장 및 Buzzer_Fg는 한번만 동작하도록 한다.
+		{
+			Event_Buzzer_One_Time_AD5 = 1;
+			EEPORM_Data_List[EE_Save_Cnt] = 65; // P형 수신기 이벤트에 회로5 단선 이벤트 추가 및 EEPROM에 저장
+			EE_Save_Cnt++;
+			Buzzer_Fg = 1; // 회로 단선시 Buzzer_On
+			IN_LED5_TOG_Fg = 1; // 0.5s 마다 회로5 LED를 Toggle
+		}
+	}
+	else
+	{
+		if(Event_Buzzer_One_Time_AD5) // Event_Buzzer_One_Time_AD5 변수를 이용해 이벤트 저장 및 Buzzer_Fg는 한번만 동작하도록 한다.
+		{
+			Event_Buzzer_One_Time_AD5 = 0;
+			EEPORM_Data_List[EE_Save_Cnt] = 20; // P형 수신기 이벤트에 회로5 정상 이벤트 추가 및 EEPROM에 저장
+			EE_Save_Cnt++;
+			Buzzer_Fg = 0; // 회로 연결시 Buzzer_OFF
+			BUZZER_OFF;
+			IN_LED5_TOG_Fg = 0; // 0.5s 마다 회로5 LED를 Toggle X
+			IN_LED5_OFF;
+		}
+	}
+	
+	/*if(TB_IN_AD6 >= 2.9) // 6회로 단선
+	{
+		if(!Event_Buzzer_One_Time_AD6) // Event_Buzzer_One_Time_AD6 변수를 이용해 이벤트 저장 및 Buzzer_Fg는 한번만 동작하도록 한다.
+		{
+			Event_Buzzer_One_Time_AD6 = 1;
+			EEPORM_Data_List[EE_Save_Cnt] = 66; // P형 수신기 이벤트에 회로6 단선 이벤트 추가 및 EEPROM에 저장
+			EE_Save_Cnt++;
+			Buzzer_Fg = 1; // 회로 단선시 Buzzer_On
+			IN_LED6_TOG_Fg = 1; // 0.5s 마다 회로6 LED를 Toggle
+		}
+	}
+	else
+	{
+		if(Event_Buzzer_One_Time_AD6) // Event_Buzzer_One_Time_AD6 변수를 이용해 이벤트 저장 및 Buzzer_Fg는 한번만 동작하도록 한다.
+		{
+			Event_Buzzer_One_Time_AD6 = 0;
+			EEPORM_Data_List[EE_Save_Cnt] = 22; // P형 수신기 이벤트에 회로6 정상 이벤트 추가 및 EEPROM에 저장
+			EE_Save_Cnt++;
+			Buzzer_Fg = 0; // 회로 연결시 Buzzer_OFF
+			BUZZER_OFF;
+			IN_LED6_TOG_Fg = 0; // 0.5s 마다 회로6 LED를 Toggle X
+			IN_LED6_OFF;
+		}
+	}
+	
+	if(TB_IN_AD7 >= 2.9) // 7회로 단선
+	{
+		if(!Event_Buzzer_One_Time_AD7) // Event_Buzzer_One_Time_AD7 변수를 이용해 이벤트 저장 및 Buzzer_Fg는 한번만 동작하도록 한다.
+		{
+			Event_Buzzer_One_Time_AD7 = 1;
+			EEPORM_Data_List[EE_Save_Cnt] = 67; // P형 수신기 이벤트에 회로7 단선 이벤트 추가 및 EEPROM에 저장
+			EE_Save_Cnt++;
+			Buzzer_Fg = 1; // 회로 단선시 Buzzer_On
+			IN_LED7_TOG_Fg = 1; // 0.5s 마다 회로7 LED를 Toggle
+		}
+	}
+	else
+	{
+		if(Event_Buzzer_One_Time_AD7) // Event_Buzzer_One_Time_AD7 변수를 이용해 이벤트 저장 및 Buzzer_Fg는 한번만 동작하도록 한다.
+		{
+			Event_Buzzer_One_Time_AD7 = 0;
+			EEPORM_Data_List[EE_Save_Cnt] = 24; // P형 수신기 이벤트에 회로7 정상 이벤트 추가 및 EEPROM에 저장
+			EE_Save_Cnt++;
+			Buzzer_Fg = 0; // 회로 연결시 Buzzer_OFF
+			BUZZER_OFF;
+			IN_LED7_TOG_Fg = 0; // 0.5s 마다 회로7 LED를 Toggle X
+			IN_LED7_OFF;
+		}
+	}
+	
+	if(TB_IN_AD8 >= 2.9) // 8회로 단선
+	{
+		if(!Event_Buzzer_One_Time_AD8) // Event_Buzzer_One_Time_AD8 변수를 이용해 이벤트 저장 및 Buzzer_Fg는 한번만 동작하도록 한다.
+		{
+			Event_Buzzer_One_Time_AD8 = 1;
+			EEPORM_Data_List[EE_Save_Cnt] = 68; // P형 수신기 이벤트에 회로8 단선 이벤트 추가 및 EEPROM에 저장
+			EE_Save_Cnt++;
+			Buzzer_Fg = 1; // 회로 단선시 Buzzer_On
+			IN_LED8_TOG_Fg = 1; // 0.5s 마다 회로8 LED를 Toggle
+		}
+	}
+	else
+	{
+		if(Event_Buzzer_One_Time_AD8) // Event_Buzzer_One_Time_AD8 변수를 이용해 이벤트 저장 및 Buzzer_Fg는 한번만 동작하도록 한다.
+		{
+			Event_Buzzer_One_Time_AD8 = 0;
+			EEPORM_Data_List[EE_Save_Cnt] = 26; // P형 수신기 이벤트에 회로8 정상 이벤트 추가 및 EEPROM에 저장
+			EE_Save_Cnt++;
+			Buzzer_Fg = 0; // 회로 연결시 Buzzer_OFF
+			BUZZER_OFF;
+			IN_LED8_TOG_Fg = 0; // 0.5s 마다 회로8 LED를 Toggle X
+			IN_LED8_OFF;
+		}
+	}
+	
+	if(TB_IN_AD9 >= 2.9) // 9회로 단선
+	{
+		if(!Event_Buzzer_One_Time_AD9) // Event_Buzzer_One_Time_AD9 변수를 이용해 이벤트 저장 및 Buzzer_Fg는 한번만 동작하도록 한다.
+		{
+			Event_Buzzer_One_Time_AD9 = 1;
+			EEPORM_Data_List[EE_Save_Cnt] = 69; // P형 수신기 이벤트에 회로9 단선 이벤트 추가 및 EEPROM에 저장
+			EE_Save_Cnt++;
+			Buzzer_Fg = 1; // 회로 단선시 Buzzer_On
+			IN_LED9_TOG_Fg = 1; // 0.5s 마다 회로9 LED를 Toggle
+		}
+	}
+	else
+	{
+		if(Event_Buzzer_One_Time_AD9) // Event_Buzzer_One_Time_AD9 변수를 이용해 이벤트 저장 및 Buzzer_Fg는 한번만 동작하도록 한다.
+		{
+			Event_Buzzer_One_Time_AD9 = 0;
+			EEPORM_Data_List[EE_Save_Cnt] = 28; // P형 수신기 이벤트에 회로9 정상 이벤트 추가 및 EEPROM에 저장
+			EE_Save_Cnt++;
+			Buzzer_Fg = 0; // 회로 연결시 Buzzer_OFF
+			BUZZER_OFF;
+			IN_LED9_TOG_Fg = 0; // 0.5s 마다 회로9 LED를 Toggle X
+			IN_LED9_OFF;
+		}
+	}
+	
+	if(TB_IN_AD10 >= 2.9) // 10회로 단선
+	{
+		if(!Event_Buzzer_One_Time_AD10) // Event_Buzzer_One_Time_AD10 변수를 이용해 이벤트 저장 및 Buzzer_Fg는 한번만 동작하도록 한다.
+		{
+			Event_Buzzer_One_Time_AD10 = 1;
+			EEPORM_Data_List[EE_Save_Cnt] = 70; // P형 수신기 이벤트에 회로10 단선 이벤트 추가 및 EEPROM에 저장
+			EE_Save_Cnt++;
+			Buzzer_Fg = 1; // 회로 단선시 Buzzer_On
+			IN_LED10_TOG_Fg = 1; // 0.5s 마다 회로10 LED를 Toggle
+		}
+	}
+	else
+	{
+		if(Event_Buzzer_One_Time_AD10) // Event_Buzzer_One_Time_AD10 변수를 이용해 이벤트 저장 및 Buzzer_Fg는 한번만 동작하도록 한다.
+		{
+			Event_Buzzer_One_Time_AD10 = 0;
+			EEPORM_Data_List[EE_Save_Cnt] = 30; // P형 수신기 이벤트에 회로10 정상 이벤트 추가 및 EEPROM에 저장
+			EE_Save_Cnt++;
+			Buzzer_Fg = 0; // 회로 연결시 Buzzer_OFF
+			BUZZER_OFF;
+			IN_LED10_TOG_Fg = 0; // 0.5s 마다 회로10 LED를 Toggle X
+			IN_LED10_OFF;
+		}
+	}*/
+	
+	if(CHK_BAT_Check_Fg)
+	{
+		if(CHK_26V >= 25.5) // 교류 전원 연결시
+		{
+			if(!CHK_Event_Save || CHK_Event_Save == 2)
+			{
+				CHK_Event_Save = 1;
+				EEPORM_Data_List[EE_Save_Cnt] = 6; // P형 수신기 이벤트에 교류전원 ON 이벤트 추가 및 EEPROM에 저장
+				EE_Save_Cnt++;
+			}
+		}
+		else // 교류 전원이 연결 되지 않았을 떄
+		{
+			if(!CHK_Event_Save || CHK_Event_Save == 1)
+			{
+				CHK_Event_Save = 2; 
+				EEPORM_Data_List[EE_Save_Cnt] = 7; // P형 수신기 이벤트에 교류전원 OFF 이벤트 추가 및 EEPROM에 저장
+				EE_Save_Cnt++;
+			}
+		}
+		
+		if(BAT_AD <= 20.0) // 배터리 전압이 20V 이하 일때
+		{
+			if(!BAT_Event_Save || BAT_Event_Save == 2)
+			{
+				BAT_Event_Save = 1;
+				EEPORM_Data_List[EE_Save_Cnt] = 5; // P형 수신기 이벤트에 예비전원 이상 이벤트 추가 및 EEPROM에 저장
+				EE_Save_Cnt++;
+			}
+		}
+		else if((BAT_AD > 20.2 && BAT_AD < 26.0) || BAT_AD >= 26.2) // 배터리 전압이 20V 이상일때
+		{
+			if(!BAT_Event_Save || BAT_Event_Save == 1)
+			{
+				BAT_Event_Save = 2;
+				EEPORM_Data_List[EE_Save_Cnt] = 4; // P형 수신기 이벤트에 예비전원 정상 이벤트 추가 및 EEPROM에 저장
+				EE_Save_Cnt++;
+			}
+		}	
+	}
+	
+	if(BAT_AD > 30.0) // CHG_H인 상태에서 배터리가 연결이 되지 않으면 30V가 나오게됨 따라서 30V 이상일때는 CHG_L를 시켜준다.
+	{
+		if(!CHG_H_L_Fg || CHG_H_L_Fg == 2)
+		{
+			CHG_L; // BAT 충전 EN - Low
+			CHG_H_L_Fg = 1;
+		}
+	}		
+	else if(BAT_AD > 1.0) // CHG_L인 상태에서 배터리가 연결이 되면 배터리를 충전시킬수 있게 CHG_H를 시켜준다.
+	{
+		if(!CHG_H_L_Fg || CHG_H_L_Fg == 1)
+		{
+			CHG_H; // BAT 충전 EN - High
+			CHG_H_L_Fg = 2;
+		}
+	}
+  }
+  
+  /* USER CODE END TIM3_IRQn 0 */
+  //HAL_TIM_IRQHandler(&htim3);
+  /* USER CODE BEGIN TIM3_IRQn 1 */
+
+  /* USER CODE END TIM3_IRQn 1 */
+}
+
+/**
+  * @brief This function handles SPI1 global interrupt.
+  */
+void SPI1_IRQHandler(void)
+{
+  /* USER CODE BEGIN SPI1_IRQn 0 */
+
+  /* USER CODE END SPI1_IRQn 0 */
+  HAL_SPI_IRQHandler(&hspi1);
+  /* USER CODE BEGIN SPI1_IRQn 1 */
+
+  /* USER CODE END SPI1_IRQn 1 */
+}
+
+/**
+  * @brief This function handles USART3 global interrupt.
+  */
+void USART3_IRQHandler(void)
+{
+  /* USER CODE BEGIN USART3_IRQn 0 */
+  byte rx3_data;
+  if((USART3->CR1 & USART_CR1_RXNEIE) && (USART3-> SR & USART_SR_RXNE))	// 수신버퍼가 채워졌다면?	
+  {
+	  Rcv3_cnt++;
+	  rx3_data = USART3->DR;	// 수신값 저장
+  }
+  else if((USART3->CR1 & USART_CR1_TCIE) && (USART3->SR & USART_SR_TC))
+  {
+	  static byte Tx3_cnt=0;
+	  Tx3_cnt++;
+	  if(Tx3_send_number)
+	  {
+		  Tx3_send_number--;  
+		  USART3->DR = Lcd_buffer[Tx3_index++];
+	  }
+	  else	//모든 Data 전송 하였음.
+	  {
+		  USART3->CR1 |= USART_CR1_RXNEIE; 	// UART2's RXE Interrupt Enable		
+		  USART3->CR1 &= ~USART_CR1_TCIE;		// UART2's TXE Interrupt Disable
+		  if(++Tx_Cnt >= List_Cnt) // 데이터 전송 리스트 갯수만큼만 데이터를 전송한다. 데이터를 전부 전송하면 Tx_Cnt, List_Cnt를 초기화 하여 새롭게 데이터 전송 리스트를 채울 준비를 한다.
+		  {
+			  Tx_Cnt = 0;
+			  List_Cnt = 0;
+		  }
+	  }
+	  return;	
+  }	
+  /* USER CODE END USART3_IRQn 0 */
+  //HAL_UART_IRQHandler(&huart3);
+  /* USER CODE BEGIN USART3_IRQn 1 */
+
+  /* USER CODE END USART3_IRQn 1 */
+}
+
+/**
+  * @brief This function handles DMA2 stream3 global interrupt.
+  */
+void DMA2_Stream3_IRQHandler(void)
+{
+  /* USER CODE BEGIN DMA2_Stream3_IRQn 0 */
+
+  /* USER CODE END DMA2_Stream3_IRQn 0 */
+  HAL_DMA_IRQHandler(&hdma_adc2);
+  /* USER CODE BEGIN DMA2_Stream3_IRQn 1 */
+
+  /* USER CODE END DMA2_Stream3_IRQn 1 */
+}
+
+/**
+  * @brief This function handles USB On The Go FS global interrupt.
+  */
+void OTG_FS_IRQHandler(void)
+{
+  /* USER CODE BEGIN OTG_FS_IRQn 0 */
+
+  /* USER CODE END OTG_FS_IRQn 0 */
+  HAL_HCD_IRQHandler(&hhcd_USB_OTG_FS);
+  /* USER CODE BEGIN OTG_FS_IRQn 1 */
+
+  /* USER CODE END OTG_FS_IRQn 1 */
+}
+
+/* USER CODE BEGIN 1 */
+
+/* USER CODE END 1 */
